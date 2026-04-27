@@ -1,8 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore.js';
+import { useContentStore } from '../store/contentStore.js';
 import AccountPopover from '../components/AccountPopover.jsx';
 import SettingsModal  from '../components/SettingsModal.jsx';
+import PatchNotesModal from '../components/PatchNotesModal.jsx';
 import launcherHeroUrl from '../assets/launcher-hero.webp';
+import { relativeDate } from '../utils/relativeDate.js';
+
+// Capitalize a kind for the tag pill ("maintenance" → "Maintenance").
+const KIND_LABELS = {
+  maintenance: 'Maintenance',
+  notice:      'Notice',
+  patch:       'Patch',
+  event:       'Event',
+};
 
 export default function HomeScreen() {
   const email                 = useAppStore((s) => s.email);
@@ -10,11 +21,24 @@ export default function HomeScreen() {
   const toggleAccountPopover  = useAppStore((s) => s.toggleAccountPopover);
   const launchGame            = useAppStore((s) => s.launchGame);
   const appState              = useAppStore((s) => s.state);
+
+  const announcements   = useContentStore((s) => s.announcements);
+  const patchNotes      = useContentStore((s) => s.patchNotes);
+  const contentLoading  = useContentStore((s) => s.loading);
+  const contentError    = useContentStore((s) => s.error);
+  const loadContent     = useContentStore((s) => s.load);
+
   const [version, setVersion] = useState('');
+  const [openPatchNote, setOpenPatchNote] = useState(null);
 
   useEffect(() => {
     window.launcher?.getVersion().then(setVersion).catch(() => setVersion(''));
   }, []);
+
+  // Load announcements + patch-notes on mount. The store is idempotent
+  // (skips if already loading); subsequent home re-mounts (e.g. after
+  // a sign-out → sign-in cycle) refetch cleanly.
+  useEffect(() => { loadContent(); }, [loadContent]);
 
   return (
     <div className="home-screen">
@@ -54,140 +78,104 @@ export default function HomeScreen() {
       </header>
 
       <main className="home-main">
-        {/* Two-column layout for the whole content area:
-            LEFT  — vertical stack of announcements feed + patch-notes rail
-            RIGHT — single shared hero image, spans full content-row height
-            Hero is OUTSIDE all scroll containers, so it never moves. */}
         <div className="home-content-row">
           <div className="home-content-stack">
-            {/* Announcements feed — primary content. Vertical stack of
-                full plates with the entire body rendered inline. No
-                dismiss (announcements are communication, not
-                notifications). Active + unexpired only; oldest fall
-                off via expires_at + the server's 5-row cap. PR 3 swaps
-                demo data for real /api/v1/launcher/announcements. */}
-            <section className="home-announcements" aria-labelledby="announcements-heading">
-              <div className="home-section-eyebrow" id="announcements-heading">
-                Announcements
-              </div>
-              <div className="announcements-feed">
-                <article className="announcement plate kind-maintenance">
-                  <header className="announcement-meta">
-                    <span className="announcement-tag">Maintenance</span>
-                    <time className="announcement-date" dateTime="2026-05-02">
-                      Sat 2pm UTC
-                    </time>
-                  </header>
-                  <h3 className="announcement-subject">Scheduled server restart</h3>
-                  <div className="announcement-body">
-                    <p>
-                      Server is restarting Saturday at 2pm UTC for the v0.7.3
-                      deployment. Expect ~10 minutes of downtime.
-                    </p>
-                    <p>
-                      Active runs will be auto-resolved; loot you've already
-                      accepted is safe in your inventory. If you're mid-run when
-                      the restart hits, you'll wake up with a system mail
-                      summarizing what happened.
-                    </p>
-                  </div>
-                </article>
+            {/* Announcements — primary content. Server returns top 5
+                active+unexpired ordered DESC; we render them all. When
+                zero rows (or initial load), we omit the section so
+                patch notes own more vertical space. */}
+            {(announcements.length > 0 || contentLoading) && (
+              <section className="home-announcements" aria-labelledby="announcements-heading">
+                <div className="home-section-eyebrow" id="announcements-heading">
+                  Announcements
+                </div>
+                <div className="announcements-feed">
+                  {contentLoading && announcements.length === 0 && (
+                    <article className="announcement plate kind-notice">
+                      <p className="announcement-body">
+                        <span style={{ color: 'var(--text-muted)' }}>Loading announcements…</span>
+                      </p>
+                    </article>
+                  )}
+                  {announcements.map((a) => (
+                    <article key={a.id} className={`announcement plate kind-${a.kind}`}>
+                      <header className="announcement-meta">
+                        <span className="announcement-tag">
+                          {KIND_LABELS[a.kind] ?? a.kind}
+                        </span>
+                        <time className="announcement-date" dateTime={a.created_at}>
+                          {relativeDate(a.created_at)}
+                        </time>
+                      </header>
+                      <h3 className="announcement-subject">{a.subject}</h3>
+                      {a.body && (
+                        <div className="announcement-body">
+                          {a.body.split(/\n\n+/).map((para, i) => (
+                            <p key={i}>{para}</p>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
 
-                <article className="announcement plate kind-deploy">
-                  <header className="announcement-meta">
-                    <span className="announcement-tag">Deploy</span>
-                    <time className="announcement-date" dateTime="2026-04-26">
-                      yesterday
-                    </time>
-                  </header>
-                  <h3 className="announcement-subject">Bags Full + run resolution shipped</h3>
-                  <div className="announcement-body">
-                    <p>
-                      v0.7.2 ships the unified post-run summary screen with
-                      Spoils / Transfer / Stash, replacing the old confirm
-                      screen. Plus a 5-minute auto-resolve sweep for abandoned
-                      runs so nothing gets stuck in limbo.
-                    </p>
-                    <p>
-                      Please report any drag-and-drop issues with the loot
-                      grid — we caught most cases but a clean staging soak
-                      helps surface the rest.
-                    </p>
-                  </div>
-                </article>
-
-                <article className="announcement plate kind-notice">
-                  <header className="announcement-meta">
-                    <span className="announcement-tag">Notice</span>
-                    <time className="announcement-date" dateTime="2026-04-24">
-                      3 days ago
-                    </time>
-                  </header>
-                  <h3 className="announcement-subject">Newsletter signups open</h3>
-                  <div className="announcement-body">
-                    <p>
-                      Sign up at project-remnant.com for devlog posts and
-                      pre-launch updates. Closed beta is still active —
-                      public sign-ups land when we flip the gate, but you
-                      can subscribe to the newsletter anytime.
-                    </p>
-                  </div>
-                </article>
-              </div>
-            </section>
-
-            {/* Patch-notes rail — secondary content. Fixed 3-card grid;
-                no scroll. Server caps GET /api/v1/launcher/patch-notes
-                at LIMIT 3 (mirrors the 5-cap on announcements). Past
-                3 most-recent, history lives in #changelog-staging
-                Discord + the public devlog — not in the launcher.
-                Click opens the full release notes in a modal (PR 3). */}
+            {/* Patch notes — fixed 3-card grid (server caps at 3).
+                Click a card → opens PatchNotesModal with the version's
+                full entries[]. */}
             <section className="home-patch-rail" aria-labelledby="patch-rail-heading">
               <div className="home-section-eyebrow" id="patch-rail-heading">
                 Patch Notes
               </div>
               <div className="patch-rail-grid">
-                <button type="button" className="patch-card kind-deploy">
-                  <div className="patch-card-headline">
-                    Bags Full + run resolution unification
+                {patchNotes.length === 0 && contentLoading && (
+                  <div style={{ gridColumn: '1 / -1', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
+                    Loading patch notes…
                   </div>
-                  <div className="patch-card-meta">
-                    <span className="patch-card-version">v0.7.3</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="patch-card-date">2 days ago</span>
+                )}
+                {patchNotes.length === 0 && !contentLoading && !contentError && (
+                  <div style={{ gridColumn: '1 / -1', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
+                    No patch notes published yet.
                   </div>
-                </button>
-                <button type="button" className="patch-card kind-deploy">
-                  <div className="patch-card-headline">
-                    Portal redesign Phase 2
-                  </div>
-                  <div className="patch-card-meta">
-                    <span className="patch-card-version">v0.7.2</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="patch-card-date">5 days ago</span>
-                  </div>
-                </button>
-                <button type="button" className="patch-card kind-deploy">
-                  <div className="patch-card-headline">
-                    Site redesign + identity cleanup
-                  </div>
-                  <div className="patch-card-meta">
-                    <span className="patch-card-version">v0.7.1</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="patch-card-date">1 week ago</span>
-                  </div>
-                </button>
+                )}
+                {patchNotes.map((note) => {
+                  // Card headline: take the first NEW entry, falling
+                  // back to the first entry of any tag, falling back
+                  // to the version. Most patch notes start with NEW
+                  // entries; this gives a meaningful card subject
+                  // without an explicit "card_title" column.
+                  const firstNew = note.entries?.find((e) => e.tag === 'NEW');
+                  const headline = firstNew?.text
+                    ?? note.entries?.[0]?.text
+                    ?? `v${note.version}`;
+                  return (
+                    <button
+                      key={note.id}
+                      type="button"
+                      className="patch-card kind-deploy"
+                      onClick={() => setOpenPatchNote(note)}
+                    >
+                      <div className="patch-card-headline">{headline}</div>
+                      <div className="patch-card-meta">
+                        <span className="patch-card-version">v{note.version}</span>
+                        <span aria-hidden="true">·</span>
+                        <span className="patch-card-date">{relativeDate(note.created_at)}</span>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
+              {contentError && (
+                <div style={{ color: 'var(--accent-danger)', fontSize: 'var(--text-xs)', marginTop: 'var(--space-2)' }}>
+                  Failed to load content: {contentError}
+                </div>
+              )}
             </section>
           </div>
 
           {/* Shared hero — single image at src/renderer/assets/launcher-hero.webp,
-              spanning the full content-row height. Vite imports the file
-              + fingerprints the URL; the inline style sets it as the
-              outermost background layer, with token-tinted radial
-              gradients overlaid in CSS to harmonize the image into the
-              warm-purple chrome. Aria-hidden — the image is purely
-              decorative; the announcements feed carries the meaning. */}
+              spanning the full content-row height. */}
           <aside
             className="home-hero"
             style={{ backgroundImage: `url(${launcherHeroUrl})` }}
@@ -197,15 +185,6 @@ export default function HomeScreen() {
       </main>
 
       <footer className="home-footer">
-        {/* PR 2 wires the spawn path; PR 5 adds the version-gate sequence
-            (check realm latest_version, run differential update, then
-            spawn). Today, clicking Play attempts to spawn the game from
-            %APPDATA%/RemnantLauncher/game/test/RemnantGame.exe — the
-            binary doesn't exist yet (PR 5 ships it), so spawn surfaces
-            a GAME_BINARY_MISSING error in the console. The auth +
-            stdin handoff path is fully wired and works once a game
-            binary lands at the expected path (e.g. via manual copy
-            for early dev). */}
         <button
           type="button"
           className="btn btn-primary play-button"
@@ -219,6 +198,12 @@ export default function HomeScreen() {
       </footer>
 
       <SettingsModal />
+      {openPatchNote && (
+        <PatchNotesModal
+          note={openPatchNote}
+          onClose={() => setOpenPatchNote(null)}
+        />
+      )}
 
       <div className="home-version">v{version || '0.0.0'}</div>
     </div>
