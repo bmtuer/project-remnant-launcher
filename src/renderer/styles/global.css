@@ -724,17 +724,9 @@ input:disabled { opacity: 0.55; }
   font-size: var(--text-base);
 }
 
-.home-version {
-  position: absolute;
-  bottom: var(--space-3);
-  left: var(--space-4);
-  font-size: var(--text-2xs);
-  color: var(--text-muted);
-  font-family: var(--font-data);
-  font-feature-settings: var(--font-data-features);
-  letter-spacing: 0.08em;
-  pointer-events: none;
-}
+/* .home-version retired — launcher version moved into Settings.
+   Bottom-left of the launcher window is reserved for the GAME
+   version once PR 5 wires the game-binary install path. */
 
 .placeholder-pane    { padding: var(--space-6); }
 .placeholder-body    { color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.65; margin: 0; }
@@ -987,6 +979,21 @@ input:disabled { opacity: 0.55; }
 .settings-radio:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
+}
+
+/* Settings modal footer — version readout on the left, Close button
+   on the right. Override modal-footer's default flex-end alignment so
+   the version + button can split the row. */
+.settings-footer {
+  justify-content: space-between;
+  align-items: center;
+}
+.settings-version {
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  letter-spacing: 0.08em;
 }
 
 /* Native select with our chrome. Stays close to the launcher's

@@ -25,6 +25,16 @@ export default function SettingsModal() {
   const [settings, setSettings] = useState(null);
   const [busyKey, setBusyKey]   = useState(null);  // key currently being saved
   const [error, setError]       = useState(null);
+  const [version, setVersion]   = useState('');
+
+  // Read launcher version once on first open. Used in the modal
+  // footer; surfaces here instead of in the launcher's bottom-left
+  // corner (that real estate is reserved for the GAME version once
+  // PR 5 wires the game-binary install path).
+  useEffect(() => {
+    if (!open) return;
+    window.launcher?.getVersion().then(setVersion).catch(() => setVersion(''));
+  }, [open]);
 
   // Load settings on first open (and re-load each subsequent open
   // in case main mutated them between sessions). Cheap fetch — IPC
@@ -110,10 +120,7 @@ export default function SettingsModal() {
           ) : (
             <>
               {/* Auto-launch on Windows startup */}
-              <SettingRow
-                label="Auto-launch on Windows startup"
-                hint="Open the launcher automatically when Windows boots."
-              >
+              <SettingRow label="Launch on startup">
                 <ToggleSwitch
                   checked={settings.autoLaunchOnStartup}
                   busy={busyKey === 'autoLaunchOnStartup'}
@@ -122,27 +129,21 @@ export default function SettingsModal() {
               </SettingRow>
 
               {/* Close-X behavior */}
-              <SettingRow
-                label="When you click the close button"
-                hint="Choose what the window's X actually does."
-              >
+              <SettingRow label="Close button">
                 <RadioGroup
                   name="closeXBehavior"
                   value={settings.closeXBehavior}
                   busy={busyKey === 'closeXBehavior'}
                   onChange={(v) => update('closeXBehavior', v)}
                   options={[
-                    { value: 'tray', label: 'Minimize to tray' },
-                    { value: 'quit', label: 'Quit the launcher' },
+                    { value: 'tray', label: 'Minimize' },
+                    { value: 'quit', label: 'Quit' },
                   ]}
                 />
               </SettingRow>
 
               {/* Default realm */}
-              <SettingRow
-                label="Default realm on launch"
-                hint="Which realm to preselect when the launcher opens."
-              >
+              <SettingRow label="Default realm">
                 <select
                   className="settings-select"
                   value={settings.defaultRealm}
@@ -158,10 +159,7 @@ export default function SettingsModal() {
                   Compact (960×640), Standard (1120×720), Large
                   (1280×800). Content rem-scales against the 960×640
                   baseline so each preset reads correctly. */}
-              <SettingRow
-                label="Window size"
-                hint="Pick a launcher window size. Applies immediately."
-              >
+              <SettingRow label="Window size">
                 <select
                   className="settings-select"
                   value={settings.windowSize}
@@ -178,15 +176,15 @@ export default function SettingsModal() {
                   game-binary installer + sha512 verify path. The
                   button is wired for future use; today it's disabled. */}
               <SettingRow
-                label="Repair Game"
-                hint="Verify the game's files and re-download anything corrupted. Lands in PR 5."
+                label="Repair game"
+                hint="Verify and restore game files."
               >
                 <button
                   type="button"
                   className="btn btn-secondary"
                   disabled
                   aria-disabled="true"
-                  title="Repair flow ships in PR 5 alongside the game updater"
+                  title="Coming in a future update"
                 >
                   Repair…
                 </button>
@@ -199,7 +197,15 @@ export default function SettingsModal() {
           )}
         </div>
 
-        <div className="modal-footer">
+        <div className="modal-footer settings-footer">
+          {/* Quiet launcher-version readout. Lives here (not in the
+              launcher's bottom-left corner) so the corner real estate
+              can carry the GAME version once PR 5 wires the binary
+              install path. Anyone debugging or filing a support ticket
+              opens Settings → reads the version. */}
+          <div className="settings-version" aria-label={`Launcher version ${version || 'unknown'}`}>
+            v{version || '0.0.0'}
+          </div>
           <button type="button" className="btn btn-primary" onClick={close}>
             Close
           </button>

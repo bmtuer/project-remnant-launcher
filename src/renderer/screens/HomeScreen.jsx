@@ -28,12 +28,11 @@ export default function HomeScreen() {
   const contentError    = useContentStore((s) => s.error);
   const loadContent     = useContentStore((s) => s.load);
 
-  const [version, setVersion] = useState('');
   const [openPatchNote, setOpenPatchNote] = useState(null);
 
-  useEffect(() => {
-    window.launcher?.getVersion().then(setVersion).catch(() => setVersion(''));
-  }, []);
+  // Launcher version moved to Settings modal — bottom-left of the
+  // launcher window is reserved for the GAME version (PR 5 will wire
+  // it once the game-binary install path lands).
 
   // Load announcements + patch-notes on mount. The store is idempotent
   // (skips if already loading); subsequent home re-mounts (e.g. after
@@ -194,7 +193,7 @@ export default function HomeScreen() {
         />
       )}
 
-      <div className="home-version">v{version || '0.0.0'}</div>
+      {/* Bottom-left corner reserved for game version (PR 5). */}
     </div>
   );
 }
