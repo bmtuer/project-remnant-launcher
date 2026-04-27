@@ -867,6 +867,148 @@ input:disabled { opacity: 0.55; }
   gap: var(--space-3);
 }
 
+/* ── Settings rows ──────────────────────────────────────────────
+   Each row is a label/hint stack on the left + a control on the
+   right. The body uses gap to space rows; no per-row margins. */
+.settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+}
+.settings-row-text {
+  flex: 1;
+  min-width: 0;
+}
+.settings-row-label {
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: var(--space-1);
+}
+.settings-row-hint {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+.settings-row-control {
+  flex-shrink: 0;
+}
+.settings-error {
+  font-size: var(--text-xs);
+  color: var(--accent-danger);
+  background: rgba(200, 64, 64, 0.08);
+  border: 1px solid rgba(200, 64, 64, 0.35);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Toggle switch — track + thumb. Off state: muted track, thumb left.
+   On state: brand-gold track, thumb right. Smooth transition on the
+   thumb for visual feedback. */
+.settings-toggle {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+.settings-toggle:disabled { cursor: not-allowed; opacity: 0.55; }
+.settings-toggle:focus-visible .settings-toggle-track {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.settings-toggle-track {
+  display: inline-flex;
+  width: 2.6rem;
+  height: 1.4rem;
+  border-radius: 999px;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-base);
+  position: relative;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+.settings-toggle-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: var(--text-secondary);
+  transition: transform 0.2s ease, background 0.2s ease;
+}
+.settings-toggle.is-on .settings-toggle-track {
+  background: var(--brand-gold);
+  border-color: var(--brand-gold);
+}
+.settings-toggle.is-on .settings-toggle-thumb {
+  background: var(--bg-base);
+  transform: translateX(1.2rem);
+}
+
+/* Radio group — horizontal segmented control. Active button gets
+   the gold-fill primary treatment; inactive buttons stay quiet. */
+.settings-radio-group {
+  display: inline-flex;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  gap: 2px;
+}
+.settings-radio {
+  background: transparent;
+  border: 0;
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.settings-radio:hover:not(:disabled):not(.is-active) {
+  color: var(--text-primary);
+}
+.settings-radio.is-active {
+  background: var(--brand-gold);
+  color: var(--bg-base);
+}
+.settings-radio:disabled { cursor: not-allowed; opacity: 0.55; }
+.settings-radio:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* Native select with our chrome. Stays close to the launcher's
+   chiseled-recessed input recipe. */
+.settings-select {
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: var(--space-2) var(--space-4);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  /* Preserve native dropdown arrow on Windows */
+}
+.settings-select:disabled { cursor: not-allowed; opacity: 0.55; }
+.settings-select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--brand-gold);
+}
+
 /* ── Patch-notes modal ──────────────────────────────────────────
    Opens from a click on a patch-card. Renders the version's
    structured entries[] (each entry is { tag, text }, tag is one

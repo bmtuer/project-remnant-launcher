@@ -10,6 +10,7 @@ import {
 } from './gameSpawner.js';
 import { startIpcServer, stopIpcServer, getPipePath } from './ipcServer.js';
 import { startLauncherUpdater, quitAndInstallLauncher } from './launcherUpdater.js';
+import { readSettings, writeSettings, peekSettings, syncAutoLaunch } from './settingsStore.js';
 
 // ─── Single-instance lock ─────────────────────────────────────────────
 // Required for the `remnant://` protocol handoff. When the game spawns
@@ -47,22 +48,34 @@ let mainWindow = null;
 let tray = null;
 let quitting = false;
 
-const WIN_BASELINE_WIDTH = 960;
-const WIN_BASELINE_HEIGHT = 640;
-const WIN_MIN_WIDTH = 800;
-const WIN_MIN_HEIGHT = 600;
-const WIN_MAX_WIDTH = 1280;
-const WIN_MAX_HEIGHT = 800;
+// Three discrete window-size presets. Player picks one in Settings
+// and the launcher remembers across launches. Bounds line up with the
+// rem-scaler in App.jsx (which references 960×640 as the baseline) —
+// at any of the three sizes, content scales proportionally so the
+// layout reads correctly without per-size CSS.
+const WINDOW_SIZE_PRESETS = Object.freeze({
+  compact:  { width: 960,  height: 640 },
+  standard: { width: 1120, height: 720 },
+  large:    { width: 1280, height: 800 },
+});
+const DEFAULT_WINDOW_SIZE = 'standard';
+
+function getPresetDimensions(name) {
+  return WINDOW_SIZE_PRESETS[name] ?? WINDOW_SIZE_PRESETS[DEFAULT_WINDOW_SIZE];
+}
 
 function createMainWindow() {
+  // Read the player's chosen preset from cached settings (already
+  // hydrated in app.whenReady before window creation).
+  const { width, height } = getPresetDimensions(peekSettings().windowSize);
+
   mainWindow = new BrowserWindow({
-    width: WIN_BASELINE_WIDTH,
-    height: WIN_BASELINE_HEIGHT,
-    minWidth: WIN_MIN_WIDTH,
-    minHeight: WIN_MIN_HEIGHT,
-    maxWidth: WIN_MAX_WIDTH,
-    maxHeight: WIN_MAX_HEIGHT,
-    resizable: true,
+    width,
+    height,
+    // Non-resizable: dropdown is the only path to a different size.
+    // Avoids the "I dragged it bigger but the dropdown still says
+    // Compact" confusion. Player picks a preset, launcher snaps to it.
+    resizable: false,
     fullscreenable: false,
     maximizable: false,
     autoHideMenuBar: true,
@@ -77,12 +90,21 @@ function createMainWindow() {
 
   mainWindow.setMenu(null);
 
-  // Close-X minimizes to tray; only tray "Quit" or app.quit() truly exits.
+  // Close-X behavior is configurable via Settings. Default is 'tray'
+  // (close minimizes to tray, like Battle.net / Riot). Players who
+  // prefer the close-button to actually quit can flip this in Settings.
   mainWindow.on('close', (event) => {
-    if (!quitting) {
-      event.preventDefault();
-      mainWindow.hide();
+    if (quitting) return;
+    const settings = peekSettings();
+    if (settings.closeXBehavior === 'quit') {
+      // User opted into quit-on-close. Mirror the tray "Quit" path.
+      quitting = true;
+      if (isGameRunning()) killGame();
+      app.quit();
+      return;
     }
+    event.preventDefault();
+    mainWindow.hide();
   });
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -248,6 +270,34 @@ function registerIpc() {
   ipcMain.handle('launcher:quitAndInstall', () => {
     quitAndInstallLauncher();
   });
+
+  // ─── Settings IPC ─────────────────────────────────────────────────
+  // Persistent settings (autoLaunchOnStartup / closeXBehavior /
+  // defaultRealm / windowSize). Lives in userData; survives launcher
+  // self-updates.
+  //
+  // windowSize is the only setting with a side-effect we need to
+  // apply mid-session (the others either auto-sync via settingsStore
+  // or take effect on the next event). When the renderer changes the
+  // dropdown, we resize the window live to match — re-centering on
+  // the current display so the new size doesn't drift to a corner.
+  ipcMain.handle('settings:get', () => readSettings());
+  ipcMain.handle('settings:set', async (_e, patch) => {
+    const next = await writeSettings(patch ?? {});
+    if (patch?.windowSize && mainWindow && !mainWindow.isDestroyed()) {
+      const { width, height } = getPresetDimensions(next.windowSize);
+      // setBounds allows changing size on a non-resizable window.
+      // Center on the display the launcher's currently on so the
+      // resize feels intentional rather than warping to a corner.
+      const { screen } = require('electron');
+      const display = screen.getDisplayMatching(mainWindow.getBounds());
+      const { workArea } = display;
+      const x = Math.round(workArea.x + (workArea.width  - width)  / 2);
+      const y = Math.round(workArea.y + (workArea.height - height) / 2);
+      mainWindow.setBounds({ x, y, width, height });
+    }
+    return next;
+  });
 }
 
 // Track URLs we received via second-instance / open-url BEFORE the
@@ -283,13 +333,23 @@ app.on('open-url', (event, url) => {
   handleProtocolUrl(url);
 });
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Drain any startup-time protocol URLs (Windows passes them via argv
   // to the first-instance process before Electron is ready).
   const startupUrl = process.argv.find((a) => a.startsWith('remnant://'));
   if (startupUrl) pendingProtocolUrls.push(startupUrl);
 
   registerIpc();
+
+  // Hydrate persistent settings before any window/tray work — populates
+  // the in-memory cache so peekSettings() returns real values during
+  // close-event handling. Also re-syncs the auto-launch flag with
+  // Windows' login-items registry; covers the case where the user
+  // toggled it on, then uninstalled-and-reinstalled the launcher
+  // somewhere else, leaving the OS registration stale.
+  const settings = await readSettings();
+  syncAutoLaunch(settings.autoLaunchOnStartup);
+
   createMainWindow();
   createTray();
 

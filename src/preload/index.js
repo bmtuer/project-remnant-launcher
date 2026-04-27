@@ -56,6 +56,15 @@ contextBridge.exposeInMainWorld('launcher', {
     quitAndInstall: () => ipcRenderer.invoke('launcher:quitAndInstall'),
   },
 
+  // Persistent launcher settings (autoLaunchOnStartup, closeXBehavior,
+  // defaultRealm). Stored in userData/settings.json — survives
+  // launcher self-updates. Renderer reads on Settings open + writes
+  // on each control change.
+  settings: {
+    get: () => ipcRenderer.invoke('settings:get'),
+    set: (patch) => ipcRenderer.invoke('settings:set', patch),
+  },
+
   // Tray "Sign Out" menu item posts this; renderer responds by tearing
   // down the session via useAppStore.signOut.
   onSignOutRequested: (handler) => {
