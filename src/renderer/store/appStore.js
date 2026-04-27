@@ -135,6 +135,12 @@ function friendlyAuthError(err) {
   const msg = err?.message ?? 'Sign-in failed.';
   if (/invalid login/i.test(msg)) return 'Email or password is incorrect.';
   if (/email not confirmed/i.test(msg)) return 'Please verify your email — check your inbox for the confirmation link.';
+  // "Failed to fetch" on a Supabase call from Electron typically means our
+  // CSP is blocking connect-src. Surface a different message so we don't
+  // gaslight ourselves into thinking the user's network is down.
+  if (/failed to fetch/i.test(msg)) {
+    return 'Could not reach the auth server. If this persists, the launcher build may need updating.';
+  }
   if (/network|fetch/i.test(msg)) return 'Network error — check your connection and try again.';
   return msg;
 }

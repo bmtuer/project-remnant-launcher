@@ -3,7 +3,23 @@
   <head>
     <meta charset="UTF-8" />
     <title>Remnant Launcher</title>
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; script-src 'self';" />
+    <!--
+      CSP allowlist — minimal but functional.
+
+      connect-src needs these, in this order:
+      - 'self'                 → bundled HMR in dev
+      - https://*.supabase.co  → identity-project Supabase Auth (sign-in,
+                                  refresh-token, sign-out). Same value the
+                                  game's renderer connects to today.
+      - http://localhost:*     → local game server (project-remnant pnpm dev:server)
+      - https://*.up.railway.app → staging game server
+      - ws://localhost:* + wss://*.up.railway.app + wss://*.supabase.co
+                                → Supabase realtime (we don't subscribe today
+                                  but the auth client opens a session-keepalive
+                                  websocket; whitelisting now avoids surprise
+                                  connect failures later)
+    -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; script-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co http://localhost:* ws://localhost:* https://*.up.railway.app wss://*.up.railway.app;" />
   </head>
   <body>
     <div id="root"></div>
