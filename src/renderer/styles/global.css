@@ -404,28 +404,87 @@ input:disabled { opacity: 0.55; }
   color: var(--brand-gold);
 }
 
-/* ── Announcements feed (PRIMARY content) ─────────────────────────
-   Vertical stack of full plates with the entire body rendered inline.
-   No dismiss — announcements are communication, not notifications.
-   This region OWNS the home-main scroll. When zero active rows, the
-   whole section omits and patch-notes-rail expands to fill (no extra
-   chrome needed). */
+/* ── Announcements section (PRIMARY content) ──────────────────────
+   The OUTER wrapper. It owns the section eyebrow + the two-column
+   row, but does NOT scroll. The inner feed column is the scroll
+   container; the hero column is its sibling, so the hero stays
+   completely outside the scroll.
+
+   When zero active rows, this whole section omits and patch-notes-
+   rail expands to fill. */
 .home-announcements {
   flex: 1;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Two-column row: announcements feed on the left, single shared hero
+   image on the right. The hero is a build-time launcher asset (one
+   image, not per-announcement); a wide ~16rem column at the 960×640
+   baseline. The row fills the available vertical space of its
+   parent (.home-announcements is flex with flex:1), and each column
+   gets `align-items: stretch` so the hero naturally fills its column
+   height. */
+.announcements-row {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  gap: var(--space-6);
+  align-items: stretch;
+}
+
+/* The feed is the scroll container. Independent from the hero —
+   scrolling here doesn't move the hero. */
+.announcements-feed {
+  min-width: 0;          /* allow body text to wrap inside the grid */
+  min-height: 0;         /* enable overflow scroll */
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: var(--space-5);
-  padding-right: var(--space-2);    /* room for the scroll thumb */
+  padding-right: var(--space-2);
 }
-.home-announcements::-webkit-scrollbar { width: 0.4rem; }
-.home-announcements::-webkit-scrollbar-track { background: transparent; }
-.home-announcements::-webkit-scrollbar-thumb {
+.announcements-feed::-webkit-scrollbar { width: 0.4rem; }
+.announcements-feed::-webkit-scrollbar-track { background: transparent; }
+.announcements-feed::-webkit-scrollbar-thumb {
   background: var(--border-base);
   border-radius: var(--radius-sm);
 }
-.home-announcements::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+.announcements-feed::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* Shared hero — a single launcher-wide image that decorates the
+   announcements row. For PR 2 this renders a gradient placeholder;
+   Bryan drops a real portrait image at
+   src/renderer/assets/launcher-hero.webp and we wire it as a
+   background-image in a follow-up. The hero is purely decorative —
+   aria-hidden="true" on the markup.
+
+   Sizing: fills its grid column's full height. Since the hero lives
+   OUTSIDE the feed's scroll container (sibling, not child), it does
+   not move when the feed scrolls. No sticky needed. */
+.announcements-hero {
+  border-radius: var(--radius-md);
+  background:
+    radial-gradient(80% 60% at 30% 20%, rgba(213, 165, 69, 0.18), transparent 70%),
+    radial-gradient(90% 70% at 80% 90%, rgba(168, 85, 247, 0.14), transparent 65%),
+    linear-gradient(160deg, var(--bg-surface), var(--bg-recessed));
+  background-size: cover;
+  background-position: center;
+  box-shadow: inset 0 0 0 1px var(--border-base), var(--shadow-md);
+}
+
+/* Single-column collapse: at narrow widths (e.g. someone resizing
+   the launcher down toward our 800px min), drop the hero so the feed
+   keeps full width. */
+@media (max-width: 56rem) {
+  .announcements-row {
+    grid-template-columns: 1fr;
+  }
+  .announcements-hero { display: none; }
+}
 
 /* Each announcement is a full plate with: meta row (tag + date) /
    subject heading / body (full content, no clamp). PR 3 swaps demo

@@ -59,68 +59,83 @@ export default function HomeScreen() {
             Announcements
           </div>
 
-          <article className="announcement plate kind-maintenance">
-            <header className="announcement-meta">
-              <span className="announcement-tag">Maintenance</span>
-              <time className="announcement-date" dateTime="2026-05-02">
-                Sat 2pm UTC
-              </time>
-            </header>
-            <h3 className="announcement-subject">Scheduled server restart</h3>
-            <div className="announcement-body">
-              <p>
-                Server is restarting Saturday at 2pm UTC for the v0.7.3
-                deployment. Expect ~10 minutes of downtime.
-              </p>
-              <p>
-                Active runs will be auto-resolved; loot you've already
-                accepted is safe in your inventory. If you're mid-run when
-                the restart hits, you'll wake up with a system mail
-                summarizing what happened.
-              </p>
-            </div>
-          </article>
+          {/* Two-column row: scrollable feed on the left, single shared
+              hero image on the right. The hero is global to the
+              launcher (one image, set in /assets/launcher-hero.webp or
+              similar), not per-announcement. PR 3's schema therefore
+              does NOT add a per-row hero_image_url — the hero is a
+              build-time launcher asset. */}
+          <div className="announcements-row">
+            <div className="announcements-feed">
+              <article className="announcement plate kind-maintenance">
+                <header className="announcement-meta">
+                  <span className="announcement-tag">Maintenance</span>
+                  <time className="announcement-date" dateTime="2026-05-02">
+                    Sat 2pm UTC
+                  </time>
+                </header>
+                <h3 className="announcement-subject">Scheduled server restart</h3>
+                <div className="announcement-body">
+                  <p>
+                    Server is restarting Saturday at 2pm UTC for the v0.7.3
+                    deployment. Expect ~10 minutes of downtime.
+                  </p>
+                  <p>
+                    Active runs will be auto-resolved; loot you've already
+                    accepted is safe in your inventory. If you're mid-run when
+                    the restart hits, you'll wake up with a system mail
+                    summarizing what happened.
+                  </p>
+                </div>
+              </article>
 
-          <article className="announcement plate kind-deploy">
-            <header className="announcement-meta">
-              <span className="announcement-tag">Deploy</span>
-              <time className="announcement-date" dateTime="2026-04-26">
-                yesterday
-              </time>
-            </header>
-            <h3 className="announcement-subject">Bags Full + run resolution shipped</h3>
-            <div className="announcement-body">
-              <p>
-                v0.7.2 ships the unified post-run summary screen with
-                Spoils / Transfer / Stash, replacing the old confirm
-                screen. Plus a 5-minute auto-resolve sweep for abandoned
-                runs so nothing gets stuck in limbo.
-              </p>
-              <p>
-                Please report any drag-and-drop issues with the loot
-                grid — we caught most cases but a clean staging soak
-                helps surface the rest.
-              </p>
-            </div>
-          </article>
+              <article className="announcement plate kind-deploy">
+                <header className="announcement-meta">
+                  <span className="announcement-tag">Deploy</span>
+                  <time className="announcement-date" dateTime="2026-04-26">
+                    yesterday
+                  </time>
+                </header>
+                <h3 className="announcement-subject">Bags Full + run resolution shipped</h3>
+                <div className="announcement-body">
+                  <p>
+                    v0.7.2 ships the unified post-run summary screen with
+                    Spoils / Transfer / Stash, replacing the old confirm
+                    screen. Plus a 5-minute auto-resolve sweep for abandoned
+                    runs so nothing gets stuck in limbo.
+                  </p>
+                  <p>
+                    Please report any drag-and-drop issues with the loot
+                    grid — we caught most cases but a clean staging soak
+                    helps surface the rest.
+                  </p>
+                </div>
+              </article>
 
-          <article className="announcement plate kind-notice">
-            <header className="announcement-meta">
-              <span className="announcement-tag">Notice</span>
-              <time className="announcement-date" dateTime="2026-04-24">
-                3 days ago
-              </time>
-            </header>
-            <h3 className="announcement-subject">Newsletter signups open</h3>
-            <div className="announcement-body">
-              <p>
-                Sign up at project-remnant.com for devlog posts and
-                pre-launch updates. Closed beta is still active —
-                public sign-ups land when we flip the gate, but you
-                can subscribe to the newsletter anytime.
-              </p>
+              <article className="announcement plate kind-notice">
+                <header className="announcement-meta">
+                  <span className="announcement-tag">Notice</span>
+                  <time className="announcement-date" dateTime="2026-04-24">
+                    3 days ago
+                  </time>
+                </header>
+                <h3 className="announcement-subject">Newsletter signups open</h3>
+                <div className="announcement-body">
+                  <p>
+                    Sign up at project-remnant.com for devlog posts and
+                    pre-launch updates. Closed beta is still active —
+                    public sign-ups land when we flip the gate, but you
+                    can subscribe to the newsletter anytime.
+                  </p>
+                </div>
+              </article>
             </div>
-          </article>
+
+            {/* Shared hero — Bryan generates a single image at v1; later
+                we may rotate per realm or season. Build-time asset, not
+                per-announcement data. */}
+            <aside className="announcements-hero" aria-hidden="true" />
+          </div>
         </section>
 
         {/* Patch notes rail — secondary content. Compact version cards in
