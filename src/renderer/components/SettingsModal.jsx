@@ -1,10 +1,13 @@
 import { useEffect } from 'react';
 import { useAppStore } from '../store/appStore.js';
 
+// Sign-out lives ONLY in the account popover — single canonical path.
+// Settings is a settings panel; duplicating destructive actions across
+// surfaces is friction without value.
+
 export default function SettingsModal() {
-  const open    = useAppStore((s) => s.settingsOpen);
-  const close   = useAppStore((s) => s.closeSettings);
-  const signOut = useAppStore((s) => s.signOut);
+  const open  = useAppStore((s) => s.settingsOpen);
+  const close = useAppStore((s) => s.closeSettings);
 
   useEffect(() => {
     if (!open) return;
@@ -45,18 +48,15 @@ export default function SettingsModal() {
 
         <div className="modal-body">
           <p className="placeholder-body">
-            Settings body (auto-launch, close-X behavior, default realm,
-            repair, sign-out) lands in PR 4. PR 2 ships the trigger + the
-            modal scaffolding only.
+            Settings body (auto-launch on Windows startup, close-X behavior,
+            default realm on launch, repair) lands in PR 4. PR 2 ships the
+            trigger + the modal scaffolding only.
           </p>
         </div>
 
         <div className="modal-footer">
-          <button type="button" className="btn btn-secondary" onClick={close}>
+          <button type="button" className="btn btn-primary" onClick={close}>
             Close
-          </button>
-          <button type="button" className="btn btn-primary" onClick={signOut}>
-            Sign Out
           </button>
         </div>
       </div>

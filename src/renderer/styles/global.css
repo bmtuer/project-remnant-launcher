@@ -386,14 +386,15 @@ input:disabled { opacity: 0.55; }
 
 .home-main {
   flex: 1;
-  overflow-y: auto;
-  padding: var(--space-8);
+  overflow: hidden;             /* the rail + the feed manage their own scrolls */
+  padding: var(--space-6) var(--space-8) var(--space-4);
   display: flex;
   flex-direction: column;
-  gap: var(--space-8);
+  gap: var(--space-5);
+  min-height: 0;                 /* enables children to size against flex parent */
 }
 
-.home-section { display: flex; flex-direction: column; gap: var(--space-3); }
+.home-section { display: flex; flex-direction: column; gap: var(--space-3); min-height: 0; }
 .home-section-eyebrow {
   font-family: var(--font-display);
   font-size: var(--text-2xs);
@@ -401,6 +402,174 @@ input:disabled { opacity: 0.55; }
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--brand-gold);
+}
+
+/* ── Announcements feed (PRIMARY content) ─────────────────────────
+   Vertical stack of full plates with the entire body rendered inline.
+   No dismiss — announcements are communication, not notifications.
+   This region OWNS the home-main scroll. When zero active rows, the
+   whole section omits and patch-notes-rail expands to fill (no extra
+   chrome needed). */
+.home-announcements {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding-right: var(--space-2);    /* room for the scroll thumb */
+}
+.home-announcements::-webkit-scrollbar { width: 0.4rem; }
+.home-announcements::-webkit-scrollbar-track { background: transparent; }
+.home-announcements::-webkit-scrollbar-thumb {
+  background: var(--border-base);
+  border-radius: var(--radius-sm);
+}
+.home-announcements::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+/* Each announcement is a full plate with: meta row (tag + date) /
+   subject heading / body (full content, no clamp). PR 3 swaps demo
+   data for real rows from /api/v1/launcher/announcements; the kind
+   field drives the colored left-stripe accent + tag color. */
+.announcement {
+  border-left: 3px solid var(--text-muted);   /* default; .kind-* overrides */
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.announcement.kind-maintenance { border-left-color: var(--accent-warning); }
+.announcement.kind-deploy      { border-left-color: var(--accent-info); }
+.announcement.kind-notice      { border-left-color: var(--text-muted); }
+.announcement.kind-feature     { border-left-color: var(--rarity-racial); }
+
+.announcement-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin: 0;
+}
+.announcement-tag {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 0.15rem var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-recessed);
+  color: var(--text-secondary);
+}
+.kind-maintenance .announcement-tag { color: var(--accent-warning); }
+.kind-deploy      .announcement-tag { color: var(--accent-info); }
+.kind-feature     .announcement-tag { color: var(--rarity-racial); }
+.kind-notice      .announcement-tag { color: var(--text-secondary); }
+
+.announcement-date {
+  font-size: var(--text-2xs);
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.announcement-subject {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--text-primary);
+  margin: 0;
+}
+.announcement-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+.announcement-body p {
+  margin: 0 0 var(--space-3) 0;
+  max-width: 50rem;
+}
+.announcement-body p:last-child { margin-bottom: 0; }
+
+/* ── Patch-notes rail (SECONDARY content) ──────────────────────
+   Compact version cards in a horizontal scroller below the
+   announcements feed. Click a card to open the full release notes
+   in a modal (PR 3). Each card is a button — keyboard-navigable + a
+   real semantic affordance for click-to-expand. */
+.home-patch-rail {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.patch-rail-scroller {
+  display: flex;
+  gap: var(--space-3);
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: var(--space-2);
+  scroll-snap-type: x proximity;
+}
+.patch-rail-scroller::-webkit-scrollbar { height: 0.4rem; }
+.patch-rail-scroller::-webkit-scrollbar-track { background: transparent; }
+.patch-rail-scroller::-webkit-scrollbar-thumb {
+  background: var(--border-base);
+  border-radius: var(--radius-sm);
+}
+.patch-rail-scroller::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+.patch-card {
+  flex: 0 0 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.12s ease;
+}
+.patch-card:hover {
+  border-color: var(--brand-gold);
+  background: var(--bg-raised);
+}
+.patch-card:active { transform: translateY(1px); }
+.patch-card:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.patch-card-version {
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--brand-gold);
+  letter-spacing: 0.04em;
+}
+.patch-card-date {
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+.patch-card-headline {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  line-height: 1.4;
+  margin-top: var(--space-2);
+  /* 2-line clamp — keeps the rail uniform across release headlines of
+     varying length. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .home-footer {

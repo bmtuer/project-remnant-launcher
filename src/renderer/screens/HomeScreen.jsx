@@ -47,17 +47,119 @@ export default function HomeScreen() {
       </header>
 
       <main className="home-main">
-        {/* Announcements stack — PR 3 fills with real data + dismiss UI.
-            When zero undismissed announcements, this section omits entirely
-            (no empty-state chrome). For now: omitted by default. */}
+        {/* Announcements feed — primary content. Vertical stack of full
+            plates with the entire body text rendered inline. No dismiss
+            (announcements are communication, not notifications). Active +
+            unexpired only; oldest fall off via the `expires_at` column.
+            Empty state: when zero active announcements, the section
+            collapses entirely and patch notes take over the full main
+            scroll. PR 3 swaps demo data for real /api/v1/launcher/announcements. */}
+        <section className="home-announcements" aria-labelledby="announcements-heading">
+          <div className="home-section-eyebrow" id="announcements-heading">
+            Announcements
+          </div>
 
-        <section className="home-section">
-          <div className="home-section-eyebrow">Patch Notes</div>
-          <div className="plate placeholder-pane">
-            <p className="placeholder-body">
-              Patch notes from <code>GET /api/v1/launcher/patch-notes</code>
-              render here in PR 3.
-            </p>
+          <article className="announcement plate kind-maintenance">
+            <header className="announcement-meta">
+              <span className="announcement-tag">Maintenance</span>
+              <time className="announcement-date" dateTime="2026-05-02">
+                Sat 2pm UTC
+              </time>
+            </header>
+            <h3 className="announcement-subject">Scheduled server restart</h3>
+            <div className="announcement-body">
+              <p>
+                Server is restarting Saturday at 2pm UTC for the v0.7.3
+                deployment. Expect ~10 minutes of downtime.
+              </p>
+              <p>
+                Active runs will be auto-resolved; loot you've already
+                accepted is safe in your inventory. If you're mid-run when
+                the restart hits, you'll wake up with a system mail
+                summarizing what happened.
+              </p>
+            </div>
+          </article>
+
+          <article className="announcement plate kind-deploy">
+            <header className="announcement-meta">
+              <span className="announcement-tag">Deploy</span>
+              <time className="announcement-date" dateTime="2026-04-26">
+                yesterday
+              </time>
+            </header>
+            <h3 className="announcement-subject">Bags Full + run resolution shipped</h3>
+            <div className="announcement-body">
+              <p>
+                v0.7.2 ships the unified post-run summary screen with
+                Spoils / Transfer / Stash, replacing the old confirm
+                screen. Plus a 5-minute auto-resolve sweep for abandoned
+                runs so nothing gets stuck in limbo.
+              </p>
+              <p>
+                Please report any drag-and-drop issues with the loot
+                grid — we caught most cases but a clean staging soak
+                helps surface the rest.
+              </p>
+            </div>
+          </article>
+
+          <article className="announcement plate kind-notice">
+            <header className="announcement-meta">
+              <span className="announcement-tag">Notice</span>
+              <time className="announcement-date" dateTime="2026-04-24">
+                3 days ago
+              </time>
+            </header>
+            <h3 className="announcement-subject">Newsletter signups open</h3>
+            <div className="announcement-body">
+              <p>
+                Sign up at project-remnant.com for devlog posts and
+                pre-launch updates. Closed beta is still active —
+                public sign-ups land when we flip the gate, but you
+                can subscribe to the newsletter anytime.
+              </p>
+            </div>
+          </article>
+        </section>
+
+        {/* Patch notes rail — secondary content. Compact version cards in
+            a horizontal scroller; click a card to open the full release
+            notes in a modal (PR 3). When zero patch-notes (rare), section
+            collapses. */}
+        <section className="home-patch-rail" aria-labelledby="patch-rail-heading">
+          <div className="home-section-eyebrow" id="patch-rail-heading">
+            Patch Notes
+          </div>
+          <div className="patch-rail-scroller">
+            <button type="button" className="patch-card">
+              <div className="patch-card-version">v0.7.3</div>
+              <div className="patch-card-date">2 days ago</div>
+              <div className="patch-card-headline">
+                Bags Full + run resolution unification
+              </div>
+            </button>
+            <button type="button" className="patch-card">
+              <div className="patch-card-version">v0.7.2</div>
+              <div className="patch-card-date">5 days ago</div>
+              <div className="patch-card-headline">
+                Portal redesign Phase 2
+              </div>
+            </button>
+            <button type="button" className="patch-card">
+              <div className="patch-card-version">v0.7.1</div>
+              <div className="patch-card-date">1 week ago</div>
+              <div className="patch-card-headline">
+                Site redesign + identity cleanup
+              </div>
+            </button>
+            <button type="button" className="patch-card">
+              <div className="patch-card-version">v0.7.0</div>
+              <div className="patch-card-date">2 weeks ago</div>
+              <div className="patch-card-headline">
+                Identity Supabase bootstrap
+              </div>
+            </button>
           </div>
         </section>
       </main>
