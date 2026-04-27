@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore.js';
 import AccountPopover from '../components/AccountPopover.jsx';
 import SettingsModal  from '../components/SettingsModal.jsx';
+import launcherHeroUrl from '../assets/launcher-hero.webp';
 
 export default function HomeScreen() {
   const email                 = useAppStore((s) => s.email);
@@ -178,13 +179,18 @@ export default function HomeScreen() {
             </section>
           </div>
 
-          {/* Shared hero — single image, spans the full content-row
-              height (announcements + patch-rail). Build-time asset at
-              src/renderer/assets/launcher-hero.webp; PR 2 ships a
-              gradient placeholder. Aria-hidden because the image is
-              purely decorative; the announcements feed carries the
-              meaning. */}
-          <aside className="home-hero" aria-hidden="true" />
+          {/* Shared hero — single image at src/renderer/assets/launcher-hero.webp,
+              spanning the full content-row height. Vite imports the file
+              + fingerprints the URL; the inline style sets it as the
+              outermost background layer, with token-tinted radial
+              gradients overlaid in CSS to harmonize the image into the
+              warm-purple chrome. Aria-hidden — the image is purely
+              decorative; the announcements feed carries the meaning. */}
+          <aside
+            className="home-hero"
+            style={{ backgroundImage: `url(${launcherHeroUrl})` }}
+            aria-hidden="true"
+          />
         </div>
       </main>
 
