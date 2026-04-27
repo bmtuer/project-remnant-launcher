@@ -28,7 +28,7 @@ export default function AuthScreen() {
   return (
     <div className="auth-screen">
       <div className="auth-stack">
-        <div className="auth-brand">REMNANT</div>
+        <div className="auth-brand">PROJECT REMNANT</div>
 
         <form className="plate auth-card" onSubmit={onSubmit} noValidate>
           <label className="auth-field">

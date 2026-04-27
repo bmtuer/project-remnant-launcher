@@ -4,7 +4,7 @@
 export default function BootScreen() {
   return (
     <div className="boot-screen">
-      <div className="boot-brand">REMNANT</div>
+      <div className="boot-brand">PROJECT REMNANT</div>
       <div className="boot-spinner" aria-hidden="true" />
     </div>
   );
