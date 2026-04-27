@@ -36,6 +36,39 @@ export default function App() {
     return () => off?.();
   }, [signOut]);
 
+  // Game lifecycle subscriptions — fire once at boot. The game-spawner
+  // dispatches exit codes via the `game:exited` event; we route on the
+  // code so the player lands in the right state when the game window
+  // closes:
+  //   0 normal             → home (game closed cleanly)
+  //   1 crash              → home + future toast (PR 5 polishes the message)
+  //   2 version-mismatch   → home + PR 5 will trigger the game-update flow
+  //   3 auth-expired       → auth (re-sign-in needed)
+  //   4 server-unreachable → home + PR 5 toasts the realm status
+  // All paths return us to a non-`playing` state — the launcher window
+  // is already restored by main when the child exits.
+  useEffect(() => {
+    const offExit = window.launcher?.game?.onExit?.((payload) => {
+      const code = payload?.code ?? 0;
+      if (code === 3) {
+        signOut();
+      } else {
+        useAppStore.setState({ state: 'home' });
+      }
+    });
+    const offError = window.launcher?.game?.onSpawnError?.((payload) => {
+      // PR 5 will surface a toast here. For PR 2 the console is fine —
+      // the most-common error in PR 2 is GAME_BINARY_MISSING, which is
+      // expected (binary distribution lands in PR 5).
+      console.warn('[launcher] game spawn error:', payload?.code, payload?.message);
+      useAppStore.setState({ state: 'home' });
+    });
+    return () => {
+      offExit?.();
+      offError?.();
+    };
+  }, [signOut]);
+
   let screen;
   if (state === 'boot') screen = <BootScreen />;
   else if (state === 'home') screen = <HomeScreen />;

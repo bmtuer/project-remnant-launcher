@@ -16,6 +16,32 @@ contextBridge.exposeInMainWorld('launcher', {
     clear: () => ipcRenderer.invoke('tokens:clear'),
   },
 
+  // Game lifecycle. PR 2 wires spawn + exit-event subscription; PR 5
+  // adds the version-gate sequence, the realm picker dropdown, and
+  // the differential-update flow before spawn.
+  game: {
+    spawn:     (bundle) => ipcRenderer.invoke('game:spawn', bundle),
+    isRunning: () => ipcRenderer.invoke('game:isRunning'),
+    onExit:    (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('game:exited', listener);
+      return () => ipcRenderer.removeListener('game:exited', listener);
+    },
+    onSpawnError: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('game:spawn-error', listener);
+      return () => ipcRenderer.removeListener('game:spawn-error', listener);
+    },
+  },
+
+  // The named-pipe path used by the spawned game for runtime IPC
+  // (token refresh). PID-scoped per main/ipcServer.js. Renderer
+  // includes this in the spawn bundle so the game can reconnect
+  // post-spawn.
+  ipc: {
+    getPipePath: () => ipcRenderer.invoke('ipc:getPipePath'),
+  },
+
   // Tray "Sign Out" menu item posts this; renderer responds by tearing
   // down the session via useAppStore.signOut.
   onSignOutRequested: (handler) => {

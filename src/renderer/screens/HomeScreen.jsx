@@ -8,6 +8,8 @@ export default function HomeScreen() {
   const email                 = useAppStore((s) => s.email);
   const openSettings          = useAppStore((s) => s.openSettings);
   const toggleAccountPopover  = useAppStore((s) => s.toggleAccountPopover);
+  const launchGame            = useAppStore((s) => s.launchGame);
+  const appState              = useAppStore((s) => s.state);
   const [version, setVersion] = useState('');
 
   useEffect(() => {
@@ -195,15 +197,24 @@ export default function HomeScreen() {
       </main>
 
       <footer className="home-footer">
-        {/* Disabled until PR 5 wires the version-gate sequence + game spawn. */}
+        {/* PR 2 wires the spawn path; PR 5 adds the version-gate sequence
+            (check realm latest_version, run differential update, then
+            spawn). Today, clicking Play attempts to spawn the game from
+            %APPDATA%/RemnantLauncher/game/test/RemnantGame.exe — the
+            binary doesn't exist yet (PR 5 ships it), so spawn surfaces
+            a GAME_BINARY_MISSING error in the console. The auth +
+            stdin handoff path is fully wired and works once a game
+            binary lands at the expected path (e.g. via manual copy
+            for early dev). */}
         <button
           type="button"
           className="btn btn-primary play-button"
-          disabled
-          aria-disabled="true"
-          title="Play sequence wires up in PR 5"
+          onClick={launchGame}
+          disabled={appState === 'playing'}
+          aria-disabled={appState === 'playing'}
+          title={appState === 'playing' ? 'Game is running' : 'Launch the game'}
         >
-          Play
+          {appState === 'playing' ? 'Playing…' : 'Play'}
         </button>
       </footer>
 

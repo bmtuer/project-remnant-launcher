@@ -13,6 +13,16 @@ files:
 win:
   target: nsis
   icon: build/icon.ico
+  # Register the launcher as the OS-level handler for `remnant://` URLs.
+  # Game-side code calls shell.openExternal('remnant://launch') when it
+  # detects a direct game launch (no JWT on stdin); Windows finds the
+  # launcher binary via this registration and routes the URL to it.
+  # Same pattern FFXIV / Battle.net / Riot use to ensure all game starts
+  # go through the launcher.
+  protocols:
+    - name: Remnant Launcher
+      schemes:
+        - remnant
 
 # NSIS installer config — explicitly NOT one-click. The launcher is the
 # only thing players ever download, so the install location matters; let

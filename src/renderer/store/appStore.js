@@ -119,7 +119,69 @@ export const useAppStore = create((set, get) => ({
       accountPopoverOpen: false,
     });
   },
+
+  // ─── Game lifecycle ──────────────────────────────────────────
+  // PR 5 wires the version-gate sequence (check realm latest_version,
+  // run differential update, then spawn). PR 2 lands the spawn path
+  // itself; the version gate currently no-ops.
+  //
+  // Bundle handed to game via stdin includes:
+  //   - jwt + refreshToken: current Supabase session
+  //   - accountId + email: identity convenience
+  //   - env + realmId: tells the game which game DB to point at
+  //   - launcherPipePath: PID-scoped pipe for runtime IPC (token refresh)
+  launchGame: async () => {
+    const session = get().session;
+    if (!session) {
+      set({ signInError: 'Sign in before launching the game.' });
+      return;
+    }
+    const launcherPipePath = await window.launcher.ipc.getPipePath();
+    const bundle = {
+      jwt:               session.access_token,
+      refreshToken:      session.refresh_token,
+      accountId:         session.user?.id ?? null,
+      email:             session.user?.email ?? null,
+      env:               'test',          // PR 5 plumbs the active realm
+      realmId:           'test',
+      launcherPipePath,
+    };
+    set({ state: 'playing' });
+    const result = await window.launcher.game.spawn(bundle);
+    if (!result?.ok) {
+      // Spawn failed — restore the home state so the player sees what
+      // happened. spawn-error event handler (registered once at app
+      // boot) will toast the specific error.
+      set({ state: 'home' });
+    }
+  },
 }));
+
+// Refresh-token round-trip — main calls this from `tokens:refresh`
+// IPC handler when the spawned game requests a fresh access_token.
+// Lives on `window` so main can reach it via executeJavaScript.
+//
+// We don't expose this through the contextBridge: it's intentionally
+// internal, and main is the only caller.
+if (typeof window !== 'undefined') {
+  window.__refreshTokens = async () => {
+    const { data, error } = await supabase.auth.refreshSession();
+    if (error || !data?.session) {
+      throw error ?? new Error('refreshSession returned no session');
+    }
+    const fresh = {
+      access_token:  data.session.access_token,
+      refresh_token: data.session.refresh_token,
+      expires_at:    data.session.expires_at ?? null,
+      email:         data.session.user?.email ?? null,
+      player_id:     data.session.user?.id ?? null,
+    };
+    // Mirror the new session into the store so any renderer code
+    // calling future server endpoints uses the rotated token.
+    useAppStore.setState({ session: data.session });
+    return fresh;
+  };
+}
 
 function serializeSession(session) {
   return {
