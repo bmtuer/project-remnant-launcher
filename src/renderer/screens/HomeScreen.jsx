@@ -139,32 +139,21 @@ export default function HomeScreen() {
                     No patch notes published yet.
                   </div>
                 )}
-                {patchNotes.map((note) => {
-                  // Card headline: take the first NEW entry, falling
-                  // back to the first entry of any tag, falling back
-                  // to the version. Most patch notes start with NEW
-                  // entries; this gives a meaningful card subject
-                  // without an explicit "card_title" column.
-                  const firstNew = note.entries?.find((e) => e.tag === 'NEW');
-                  const headline = firstNew?.text
-                    ?? note.entries?.[0]?.text
-                    ?? `v${note.version}`;
-                  return (
-                    <button
-                      key={note.id}
-                      type="button"
-                      className="patch-card kind-deploy"
-                      onClick={() => setOpenPatchNote(note)}
-                    >
-                      <div className="patch-card-headline">{headline}</div>
-                      <div className="patch-card-meta">
-                        <span className="patch-card-version">v{note.version}</span>
-                        <span aria-hidden="true">·</span>
-                        <span className="patch-card-date">{relativeDate(note.created_at)}</span>
-                      </div>
-                    </button>
-                  );
-                })}
+                {patchNotes.map((note) => (
+                  // Card is intentionally minimal — version + date.
+                  // No derived headline (the previous "first NEW
+                  // entry" pattern was brittle since entries[0] could
+                  // be anything). Players click to read what changed.
+                  <button
+                    key={note.id}
+                    type="button"
+                    className="patch-card kind-deploy"
+                    onClick={() => setOpenPatchNote(note)}
+                  >
+                    <div className="patch-card-version">v{note.version}</div>
+                    <div className="patch-card-date">{relativeDate(note.created_at)}</div>
+                  </button>
+                ))}
               </div>
               {contentError && (
                 <div style={{ color: 'var(--accent-danger)', fontSize: 'var(--text-xs)', marginTop: 'var(--space-2)' }}>
