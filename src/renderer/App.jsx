@@ -4,6 +4,14 @@ import BootScreen from './screens/BootScreen.jsx';
 import AuthScreen from './screens/AuthScreen.jsx';
 import HomeScreen from './screens/HomeScreen.jsx';
 import LauncherUpdateBanner from './components/LauncherUpdateBanner.jsx';
+import { connectLauncherSocket, disconnectLauncherSocket } from './api/launcherSocket.js';
+
+// Polling fallback for live server status. The Socket.io connection
+// is the primary channel — this REST refresh runs every 5 min as
+// belt-and-suspenders for the case where the socket is genuinely
+// broken (corporate firewall blocking WebSocket, server-side socket
+// crash, etc). Also runs once on initial home mount.
+const STATUS_POLL_INTERVAL_MS = 5 * 60 * 1000;
 
 export default function App() {
   const appRef  = useRef(null);
@@ -53,6 +61,27 @@ export default function App() {
     });
     return () => off?.();
   }, [setUpdateStatus]);
+
+  // Socket.io launcher-status connection + REST polling fallback.
+  // Connect when the user reaches `home` (signed-in, has JWT);
+  // disconnect on sign-out / boot transitions. Poll every 5 min as
+  // a backup channel for when the socket is unreachable.
+  useEffect(() => {
+    if (state !== 'home') {
+      disconnectLauncherSocket();
+      return;
+    }
+    connectLauncherSocket();
+    // Belt-and-suspenders REST refresh on home entry — Socket.io's
+    // initial-snapshot handler should arrive within ~50ms, but if
+    // something blocks the connection (firewall, etc), this catches.
+    loadServerStatus();
+    const interval = setInterval(() => loadServerStatus(), STATUS_POLL_INTERVAL_MS);
+    return () => {
+      clearInterval(interval);
+      disconnectLauncherSocket();
+    };
+  }, [state, loadServerStatus]);
 
   // Game lifecycle subscriptions — fire once at boot. The game-spawner
   // dispatches exit codes via the `game:exited` event; we route on the
