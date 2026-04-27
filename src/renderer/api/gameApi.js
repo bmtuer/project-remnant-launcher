@@ -36,6 +36,30 @@ async function authedGet(path) {
   return res.json();
 }
 
+/**
+ * GET /status — public, unauthenticated. Returns the live server
+ * state the launcher gates on:
+ *   - maintenance: bool
+ *   - message: maintenance message (when maintenance is true)
+ *   - minClientVersion: server's required game-binary version
+ *   - minLauncherVersion: server's required launcher version
+ *
+ * Called pre-auth (so an outdated launcher learns it needs to update
+ * before it tries to sign in) AND post-auth (defense in depth +
+ * polling fallback when Socket.io is disconnected).
+ */
+export async function fetchServerStatus() {
+  const res = await fetch(`${API_BASE}/status`, {
+    method: 'GET',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Status ${res.status}: ${text || res.statusText}`);
+  }
+  return res.json();
+}
+
 export async function fetchAnnouncements() {
   const data = await authedGet('/launcher/announcements');
   return data.announcements ?? [];

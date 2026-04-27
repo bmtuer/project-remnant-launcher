@@ -1,5 +1,24 @@
 import { create } from 'zustand';
 import { supabase } from '../auth/supabase.js';
+import { fetchServerStatus } from '../api/gameApi.js';
+
+/** Compares two semver strings ("0.1.2" vs "0.2.0"). Returns
+ * negative if a < b, positive if a > b, 0 if equal. Strict X.Y.Z
+ * format only — non-semver inputs return 0 (treated as equal, no
+ * gate). String comparison fails for "0.4.10" < "0.4.9", which is
+ * why we need numeric per-segment compare. */
+function semverCompare(a, b) {
+  if (!a || !b) return 0;
+  const re = /^(\d+)\.(\d+)\.(\d+)$/;
+  const ma = a.match(re);
+  const mb = b.match(re);
+  if (!ma || !mb) return 0;
+  for (let i = 1; i <= 3; i++) {
+    const da = Number(ma[i]) - Number(mb[i]);
+    if (da !== 0) return da;
+  }
+  return 0;
+}
 
 // State machine for the launcher shell.
 //   boot    → reading stored tokens / checking launcher self-update
@@ -41,6 +60,26 @@ export const useAppStore = create((set, get) => ({
     error: null,
   },
 
+  // Live server state, fetched from GET /api/v1/status. Updated:
+  //   - on launcher boot (pre-auth, lets us gate stale launchers
+  //     from signing in)
+  //   - on home-screen mount (post-auth, defense in depth)
+  //   - via Socket.io launcher-status push (PR 4 step 3)
+  //   - via 5-min polling fallback (PR 4 step 3)
+  //
+  // `loaded` flips true after the first successful fetch — used by
+  // the auth screen so we don't gate sign-in on an unfetched state
+  // (would lock players out during the first ~500ms of boot before
+  // /status resolves).
+  serverState: {
+    loaded:             false,
+    maintenance:        false,
+    message:            null,
+    minClientVersion:   null,
+    minLauncherVersion: null,
+    error:              null,
+  },
+
   // Sign-in form state ────────────────────────────────────────────
   signInError: null,
   signInBusy: false,
@@ -59,6 +98,52 @@ export const useAppStore = create((set, get) => ({
         ...(payload.version !== undefined ? { version: payload.version } : {}),
         ...(payload.percent !== undefined ? { progress: Math.round(payload.percent) } : {}),
         ...(payload.message !== undefined ? { error: payload.message } : {}),
+      },
+    })),
+
+  // Load /status from the game server. Called on boot (pre-auth) and
+  // again on home mount (post-auth, defense in depth). Socket.io push
+  // events also call into the same `applyServerStatus` reducer so
+  // socket + REST stay consistent.
+  loadServerStatus: async () => {
+    try {
+      const data = await fetchServerStatus();
+      set((s) => ({
+        serverState: {
+          ...s.serverState,
+          loaded:             true,
+          maintenance:        Boolean(data.maintenance),
+          message:            data.message ?? null,
+          minClientVersion:   data.minClientVersion ?? null,
+          minLauncherVersion: data.minLauncherVersion ?? null,
+          error:              null,
+        },
+      }));
+    } catch (err) {
+      set((s) => ({
+        serverState: {
+          ...s.serverState,
+          // Don't reset existing state on a failed fetch — if we have
+          // valid data from a prior load, preserve it rather than
+          // flapping to defaults. Socket.io reconnects will retry.
+          error: err?.message ?? 'Failed to fetch server status.',
+        },
+      }));
+    }
+  },
+
+  // Apply a server-pushed status update (used by Socket.io listener
+  // in PR 4 step 3). Same shape as loadServerStatus's success path.
+  applyServerStatus: (data) =>
+    set((s) => ({
+      serverState: {
+        ...s.serverState,
+        loaded:             true,
+        maintenance:        Boolean(data.maintenance),
+        message:            data.message ?? null,
+        minClientVersion:   data.minClientVersion ?? s.serverState.minClientVersion,
+        minLauncherVersion: data.minLauncherVersion ?? s.serverState.minLauncherVersion,
+        error:              null,
       },
     })),
 
@@ -207,6 +292,26 @@ if (typeof window !== 'undefined') {
     useAppStore.setState({ session: data.session });
     return fresh;
   };
+}
+
+/**
+ * Selector: is the launcher's installed version below the server's
+ * required minimum? Returns false until both `serverState.loaded`
+ * and the launcher's version have been fetched, so we don't flash
+ * a "stale" gate during boot.
+ *
+ * Caller passes the launcher version (read from app.getVersion()
+ * via window.launcher.getVersion). Component:
+ *
+ *   const stale = useIsLauncherStale(launcherVersion);
+ */
+export function useIsLauncherStale(launcherVersion) {
+  return useAppStore((s) => {
+    if (!s.serverState.loaded) return false;
+    const required = s.serverState.minLauncherVersion;
+    if (!required || !launcherVersion) return false;
+    return semverCompare(launcherVersion, required) < 0;
+  });
 }
 
 function serializeSession(session) {

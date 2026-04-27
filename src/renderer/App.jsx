@@ -7,10 +7,11 @@ import LauncherUpdateBanner from './components/LauncherUpdateBanner.jsx';
 
 export default function App() {
   const appRef  = useRef(null);
-  const state           = useAppStore((s) => s.state);
-  const hydrate         = useAppStore((s) => s.hydrate);
-  const signOut         = useAppStore((s) => s.signOut);
-  const setUpdateStatus = useAppStore((s) => s.setUpdateStatus);
+  const state             = useAppStore((s) => s.state);
+  const hydrate           = useAppStore((s) => s.hydrate);
+  const signOut           = useAppStore((s) => s.signOut);
+  const setUpdateStatus   = useAppStore((s) => s.setUpdateStatus);
+  const loadServerStatus  = useAppStore((s) => s.loadServerStatus);
 
   // Rem-scaling — mirrors project-remnant/src/renderer/App.jsx:144-156
   // baselined for the launcher window: 960×640 → 13px root. Min/max clamp
@@ -31,6 +32,12 @@ export default function App() {
   // Boot — try to restore a session from main-process storage. On miss /
   // expired / decrypt-failure, transitions to `auth`. On success, `home`.
   useEffect(() => { hydrate(); }, [hydrate]);
+
+  // Boot — fetch live server state (maintenance flag + min versions).
+  // Pre-auth fetch lets us gate stale launchers from signing in. The
+  // status endpoint is unauthenticated; runs in parallel with hydrate.
+  // Socket.io will keep this fresh in PR 4's next commit.
+  useEffect(() => { loadServerStatus(); }, [loadServerStatus]);
 
   // Tray "Sign Out" routes here.
   useEffect(() => {
