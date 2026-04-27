@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Standalone Electron launcher for Project Remnant — sign-in, realm picker, game-binary distribution.",
   "main": "out/main/index.js",
+  "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

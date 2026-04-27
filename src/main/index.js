@@ -9,6 +9,7 @@ import {
   showLauncherWindows,
 } from './gameSpawner.js';
 import { startIpcServer, stopIpcServer, getPipePath } from './ipcServer.js';
+import { startLauncherUpdater, quitAndInstallLauncher } from './launcherUpdater.js';
 
 // ─── Single-instance lock ─────────────────────────────────────────────
 // Required for the `remnant://` protocol handoff. When the game spawns
@@ -237,6 +238,16 @@ function registerIpc() {
   });
 
   ipcMain.handle('game:isRunning', () => isGameRunning());
+
+  // ─── Launcher self-update IPC ─────────────────────────────────────
+  // Renderer subscribes to `launcher:update-status` events emitted by
+  // launcherUpdater.js (status: checking / available / progress / ready
+  // / up-to-date / error). When the player clicks "Restart & Install"
+  // on the update banner, the renderer invokes this handler — main
+  // calls autoUpdater.quitAndInstall on the next tick.
+  ipcMain.handle('launcher:quitAndInstall', () => {
+    quitAndInstallLauncher();
+  });
 }
 
 // Track URLs we received via second-instance / open-url BEFORE the
@@ -281,6 +292,14 @@ app.whenReady().then(() => {
   registerIpc();
   createMainWindow();
   createTray();
+
+  // Launcher self-updater. Checks bmtuer/project-remnant-launcher-releases
+  // for newer versions, downloads in background, emits
+  // `launcher:update-status` events the renderer subscribes to. Pre-auth
+  // banner surfaces when an update is ready so a stale launcher can't
+  // sign in to a server with a bumped MIN_REQUIRED_LAUNCHER_VERSION.
+  // Skipped in dev (no packaged binary to update against).
+  startLauncherUpdater(mainWindow);
 
   // IPC server for the spawned game's runtime requests (token refresh).
   // Pipe path is PID-scoped — the spawned game inherits our PID

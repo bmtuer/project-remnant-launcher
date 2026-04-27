@@ -3,12 +3,14 @@ import { useAppStore }  from './store/appStore.js';
 import BootScreen from './screens/BootScreen.jsx';
 import AuthScreen from './screens/AuthScreen.jsx';
 import HomeScreen from './screens/HomeScreen.jsx';
+import LauncherUpdateBanner from './components/LauncherUpdateBanner.jsx';
 
 export default function App() {
   const appRef  = useRef(null);
-  const state   = useAppStore((s) => s.state);
-  const hydrate = useAppStore((s) => s.hydrate);
-  const signOut = useAppStore((s) => s.signOut);
+  const state           = useAppStore((s) => s.state);
+  const hydrate         = useAppStore((s) => s.hydrate);
+  const signOut         = useAppStore((s) => s.signOut);
+  const setUpdateStatus = useAppStore((s) => s.setUpdateStatus);
 
   // Rem-scaling — mirrors project-remnant/src/renderer/App.jsx:144-156
   // baselined for the launcher window: 960×640 → 13px root. Min/max clamp
@@ -35,6 +37,15 @@ export default function App() {
     const off = window.launcher?.onSignOutRequested?.(() => signOut());
     return () => off?.();
   }, [signOut]);
+
+  // Launcher self-update events. Subscribe once at boot; main fires
+  // `launcher:update-status` for the lifecycle of each check.
+  useEffect(() => {
+    const off = window.launcher?.updater?.onUpdateStatus?.((payload) => {
+      setUpdateStatus(payload);
+    });
+    return () => off?.();
+  }, [setUpdateStatus]);
 
   // Game lifecycle subscriptions — fire once at boot. The game-spawner
   // dispatches exit codes via the `game:exited` event; we route on the
@@ -76,6 +87,7 @@ export default function App() {
 
   return (
     <div id="app-root" ref={appRef}>
+      <LauncherUpdateBanner />
       {screen}
     </div>
   );

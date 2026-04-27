@@ -29,12 +29,38 @@ export const useAppStore = create((set, get) => ({
   settingsOpen: false,
   accountPopoverOpen: false,
 
+  // Launcher self-update state. Updated by the launcher:update-status
+  // IPC subscription wired in App.jsx. `status` mirrors the values
+  // launcherUpdater.js emits; ui surfaces a banner when status is
+  // `available` / `progress` / `ready`. `error` is logged but
+  // non-blocking — launcher still works at the current version.
+  update: {
+    status: 'idle',  // idle | checking | available | progress | ready | up-to-date | error
+    version: null,
+    progress: 0,     // 0-100
+    error: null,
+  },
+
   // Sign-in form state ────────────────────────────────────────────
   signInError: null,
   signInBusy: false,
 
   // ── Actions ────────────────────────────────────────────────────
   setState: (state) => set({ state }),
+
+  // Launcher self-update event handler — wired once at boot in App.jsx
+  // to window.launcher.updater.onUpdateStatus. Maintains the update
+  // slice of the store; UI subscribes to s.update.status.
+  setUpdateStatus: (payload) =>
+    set((s) => ({
+      update: {
+        ...s.update,
+        status: payload.status,
+        ...(payload.version !== undefined ? { version: payload.version } : {}),
+        ...(payload.percent !== undefined ? { progress: Math.round(payload.percent) } : {}),
+        ...(payload.message !== undefined ? { error: payload.message } : {}),
+      },
+    })),
 
   openSettings:  () => set({ settingsOpen: true,  accountPopoverOpen: false }),
   closeSettings: () => set({ settingsOpen: false }),

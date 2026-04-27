@@ -42,6 +42,20 @@ contextBridge.exposeInMainWorld('launcher', {
     getPipePath: () => ipcRenderer.invoke('ipc:getPipePath'),
   },
 
+  // Launcher self-update lifecycle. Main emits `launcher:update-status`
+  // events with shape { status, ...payload } where status is one of
+  // `checking` / `available` / `progress` / `ready` / `up-to-date` /
+  // `error`. Renderer subscribes via onUpdateStatus; clicks
+  // quitAndInstall when the player consents to restart.
+  updater: {
+    onUpdateStatus: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('launcher:update-status', listener);
+      return () => ipcRenderer.removeListener('launcher:update-status', listener);
+    },
+    quitAndInstall: () => ipcRenderer.invoke('launcher:quitAndInstall'),
+  },
+
   // Tray "Sign Out" menu item posts this; renderer responds by tearing
   // down the session via useAppStore.signOut.
   onSignOutRequested: (handler) => {

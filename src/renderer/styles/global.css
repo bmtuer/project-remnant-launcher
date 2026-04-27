@@ -918,3 +918,67 @@ input:disabled { opacity: 0.55; }
   cursor: pointer;
 }
 .patch-devlog-link:hover { color: var(--brand-gold); }
+
+/* ── Launcher self-update banner ───────────────────────────────
+   Sticks to the top edge of #app-root above every screen
+   (boot/auth/home). Pre-auth visibility is intentional — a stale
+   launcher shouldn't be able to sign in. Keeps the banner thin
+   (~36px) so it doesn't dominate the launcher chrome.
+
+   Status colors mirror semantic accents: available + progress use
+   --accent-info (downloading is informational); ready uses
+   --brand-gold (CTA-grade, "click me to restart"). */
+.update-banner {
+  position: relative;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-5);
+  background: var(--bg-recessed);
+  border-bottom: 1px solid var(--accent-info);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.update-banner-progress {
+  flex: 1;
+  height: 0.4rem;
+  background: var(--bg-base);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  border: 1px solid var(--border-base);
+}
+.update-banner-progress-fill {
+  height: 100%;
+  background: var(--accent-info);
+  transition: width 0.2s ease;
+}
+.update-banner-percent {
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  min-width: 3rem;
+  text-align: right;
+}
+.update-banner-action {
+  margin-left: auto;
+  background: var(--brand-gold);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--bg-base);
+  cursor: pointer;
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.update-banner-action:hover {
+  background: #b88a30;
+  box-shadow: 0 0 0 3px var(--focus-ring-glow);
+}

@@ -5,7 +5,8 @@ release
 .vite
 .env
 .env.local
-.env.*.local
+.env.release
+.env.*
 .DS_Store
 Thumbs.db
 *.log
