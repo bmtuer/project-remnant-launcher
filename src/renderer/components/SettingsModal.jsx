@@ -87,10 +87,13 @@ export default function SettingsModal() {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <div>
-            <div className="modal-eyebrow">Settings</div>
-            <h2 id="settings-title" className="modal-title">Launcher Settings</h2>
-          </div>
+          {/* No eyebrow — the heading carries the label on its own.
+              Eyebrow vocabulary is reserved for content modals like
+              PatchNotesModal where the eyebrow + heading carry
+              different information ("PATCH NOTES" / "v0.7.3"). On a
+              utility modal that's just "settings," the eyebrow
+              duplicates the heading. */}
+          <h2 id="settings-title" className="modal-title">Launcher Settings</h2>
           <button
             type="button"
             className="modal-close"
