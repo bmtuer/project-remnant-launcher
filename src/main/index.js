@@ -1,5 +1,6 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell } from 'electron';
 import { join } from 'path';
+import { readTokens, writeTokens, clearTokens } from './tokenStore.js';
 
 let mainWindow = null;
 let tray = null;
@@ -35,7 +36,7 @@ function createMainWindow() {
 
   mainWindow.setMenu(null);
 
-  // Close-X minimizes to tray; only the tray "Quit" or app.quit() truly exits.
+  // Close-X minimizes to tray; only tray "Quit" or app.quit() truly exits.
   mainWindow.on('close', (event) => {
     if (!quitting) {
       event.preventDefault();
@@ -61,18 +62,14 @@ function showMainWindow() {
 }
 
 function createTray() {
-  // Placeholder icon — final art deferred. A 1x1 transparent native image
-  // works as a no-op icon while we ship; Windows shows a generic tray slot.
-  // Replace with `build/icons/tray.ico` when art lands.
+  // Placeholder icon — final art deferred. nativeImage.createEmpty() yields
+  // a generic Windows tray slot; replace with `build/icons/tray.ico` at art-pass.
   const icon = nativeImage.createEmpty();
   tray = new Tray(icon);
   tray.setToolTip('Remnant Launcher');
 
   const menu = Menu.buildFromTemplate([
-    {
-      label: 'Open Launcher',
-      click: () => showMainWindow(),
-    },
+    { label: 'Open Launcher', click: () => showMainWindow() },
     { type: 'separator' },
     {
       label: 'Sign Out',
@@ -101,6 +98,32 @@ function registerIpc() {
     quitting = true;
     app.quit();
   });
+
+  ipcMain.handle('shell:openExternal', async (_e, url) => {
+    // Allowlist by origin — only open URLs we vended (project-remnant.com,
+    // staging vercel preview origins). Defense against a compromised
+    // renderer trying to launch arbitrary URLs.
+    try {
+      const parsed = new URL(url);
+      const ok =
+        parsed.protocol === 'https:' &&
+        (
+          parsed.hostname === 'project-remnant.com' ||
+          parsed.hostname.endsWith('.project-remnant.com') ||
+          parsed.hostname === 'project-remnant-site.vercel.app' ||
+          parsed.hostname.endsWith('.vercel.app')
+        );
+      if (!ok) return false;
+      await shell.openExternal(url);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+
+  ipcMain.handle('tokens:get',   ()       => readTokens());
+  ipcMain.handle('tokens:set',   (_e, t)  => writeTokens(t));
+  ipcMain.handle('tokens:clear', ()       => clearTokens());
 }
 
 app.whenReady().then(() => {
@@ -114,9 +137,8 @@ app.whenReady().then(() => {
   });
 });
 
-// Don't quit when all windows close — the launcher lives in the tray.
-// Only the tray "Quit" menu item or app.quit() truly exits.
 app.on('window-all-closed', (event) => {
+  // Don't quit when all windows close — launcher lives in the tray.
   event.preventDefault?.();
 });
 

@@ -12,6 +12,7 @@
   "dependencies": {
     "@fontsource-variable/fraunces": "^5.2.9",
     "@fontsource/inter": "^5.2.8",
+    "@supabase/supabase-js": "^2.105.0",
     "electron-updater": "^6.8.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

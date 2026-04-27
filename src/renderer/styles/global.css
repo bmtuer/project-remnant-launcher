@@ -1,8 +1,5 @@
 @import './tokens.css';
 
-/* Self-hosted fonts via @fontsource — same package + version range as
-   the site so we get the same visible faces. Variable Fraunces covers
-   weight + opsz axis; Inter ships per-weight (only the four we use). */
 @import '@fontsource-variable/fraunces';
 @import '@fontsource/inter/400.css';
 @import '@fontsource/inter/500.css';
@@ -13,9 +10,7 @@
    BASE STYLES
 ═══════════════════════════════════════════════════════════════ */
 
-*, *::before, *::after {
-  box-sizing: border-box;
-}
+*, *::before, *::after { box-sizing: border-box; }
 
 html, body {
   margin: 0;
@@ -39,9 +34,8 @@ html {
   color-scheme: dark;
 }
 
-body, #root, #app-root {
-  height: 100%;
-}
+body, #root, #app-root { height: 100%; }
+#app-root { display: flex; flex-direction: column; }
 
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-display);
@@ -51,7 +45,6 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
   margin: 0 0 var(--space-4) 0;
 }
-
 h1 { font-size: var(--text-3xl); }
 h2 { font-size: var(--text-2xl); }
 h3 { font-size: var(--text-xl); }
@@ -59,26 +52,42 @@ h4 { font-size: var(--text-lg); }
 h5 { font-size: var(--text-md); }
 h6 { font-size: var(--text-base); }
 
-p {
-  margin: 0 0 var(--space-4) 0;
-}
+p { margin: 0 0 var(--space-4) 0; }
 
 a {
   color: var(--brand-gold);
   text-decoration: none;
   cursor: pointer;
 }
-a:hover { color: var(--text-primary); }
+a:hover  { color: var(--text-primary); }
 a:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
   border-radius: var(--radius-sm);
 }
 
-input, textarea, select, button {
-  font-family: inherit;
-  font-size: inherit;
+input, textarea, select, button { font-family: inherit; font-size: inherit; }
+
+input[type='email'],
+input[type='password'],
+input[type='text'] {
+  width: 100%;
+  background: var(--bg-recessed);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-base);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
+input[type='email']:focus,
+input[type='password']:focus,
+input[type='text']:focus {
+  outline: none;
+  border-color: var(--brand-gold);
+  box-shadow: 0 0 0 3px var(--focus-ring-glow);
+}
+input:disabled { opacity: 0.55; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -88,12 +97,7 @@ input, textarea, select, button {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   PLATE — A3a-with-whisper-grain primitive, mirrored from site
-   (which is mirrored from game §3.1).
-
-   Opaque --bg-surface body, hairline border, soft elevation. The
-   launcher uses this everywhere a "card on the page" is wanted —
-   sign-in form, realm tiles, patch-note containers, settings panel.
+   PRIMITIVES — plate + buttons
 ═══════════════════════════════════════════════════════════════ */
 
 .plate {
@@ -103,15 +107,7 @@ input, textarea, select, button {
   padding: var(--space-8);
   box-shadow: var(--shadow-md);
 }
-
-.plate-compact {
-  padding: var(--space-6);
-}
-
-/* ═══════════════════════════════════════════════════════════════
-   BUTTONS — primary (solid gold) + secondary (transparent + rim)
-   Lifted from site's .site-btn-* family.
-═══════════════════════════════════════════════════════════════ */
+.plate-compact { padding: var(--space-6); }
 
 .btn {
   display: inline-flex;
@@ -129,13 +125,10 @@ input, textarea, select, button {
   cursor: pointer;
   white-space: nowrap;
   transition:
-    background 0.2s ease,
-    color 0.2s ease,
-    border-color 0.2s ease,
-    box-shadow 0.2s ease,
+    background 0.2s ease, color 0.2s ease,
+    border-color 0.2s ease, box-shadow 0.2s ease,
     transform 0.12s ease;
 }
-
 .btn-primary {
   background: var(--brand-gold);
   border-color: var(--brand-gold);
@@ -146,7 +139,7 @@ input, textarea, select, button {
   border-color: #b88a30;
   box-shadow: 0 0 0 3px var(--focus-ring-glow);
 }
-.btn-primary:active { transform: translateY(1px); }
+.btn-primary:active     { transform: translateY(1px); }
 .btn-primary:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
@@ -161,7 +154,7 @@ input, textarea, select, button {
   border-color: var(--brand-gold);
   color: var(--brand-gold);
 }
-.btn-secondary:active { transform: translateY(1px); }
+.btn-secondary:active   { transform: translateY(1px); }
 .btn-secondary:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 3px;
@@ -179,102 +172,392 @@ input, textarea, select, button {
 }
 
 /* ═══════════════════════════════════════════════════════════════
-   APP SHELL  —  side nav + main pane layout
+   BOOT SCREEN — brief splash during session restore
 ═══════════════════════════════════════════════════════════════ */
 
-#app-root {
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-}
-
-.launcher-nav {
-  width: 14rem;
-  flex-shrink: 0;
-  background: var(--bg-recessed);
-  border-right: 1px solid var(--border-base);
+.boot-screen {
+  flex: 1;
   display: flex;
   flex-direction: column;
-  padding: var(--space-6) var(--space-4);
-  gap: var(--space-2);
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-8);
 }
-
-.launcher-brand {
+.boot-brand {
   font-family: var(--font-display);
-  font-size: var(--text-lg);
+  font-size: var(--text-3xl);
   font-weight: 600;
+  letter-spacing: 0.12em;
   color: var(--brand-gold);
-  letter-spacing: 0.04em;
-  padding: var(--space-2) var(--space-3);
-  margin-bottom: var(--space-4);
 }
-
-.launcher-nav-item {
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  padding: var(--space-3) var(--space-4);
-  text-align: left;
-  font-family: var(--font-display);
-  font-size: var(--text-sm);
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--text-secondary);
-  cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+.boot-spinner {
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 2px solid var(--border-base);
+  border-top-color: var(--brand-gold);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
+@keyframes spin { to { transform: rotate(360deg); } }
 
-.launcher-nav-item:hover {
-  color: var(--text-primary);
-  background: var(--bg-raised);
-}
+/* ═══════════════════════════════════════════════════════════════
+   AUTH SCREEN — single centered card, no nav, no tabs
+═══════════════════════════════════════════════════════════════ */
 
-.launcher-nav-item.is-active {
-  color: var(--brand-gold);
-  background: var(--bg-surface);
-  border-color: var(--border-base);
-}
-
-.launcher-nav-spacer {
+.auth-screen {
   flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-8);
+  position: relative;
 }
 
-.launcher-version {
+.auth-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  width: 100%;
+  max-width: 26rem;
+}
+
+.auth-brand {
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--brand-gold);
+}
+
+.auth-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.auth-field { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.auth-label {
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.auth-error {
+  font-size: var(--text-sm);
+  color: var(--accent-danger);
+  background: rgba(200, 64, 64, 0.08);
+  border: 1px solid rgba(200, 64, 64, 0.35);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+
+.auth-submit { margin-top: var(--space-2); width: 100%; }
+
+.auth-footer-links {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  margin-top: var(--space-2);
+}
+.auth-footer-links a { color: var(--text-secondary); }
+.auth-footer-links a:hover { color: var(--brand-gold); }
+
+.auth-server-strip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+}
+
+.status-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  display: inline-block;
+}
+.status-dot-online      { background: var(--accent-success); }
+.status-dot-maintenance { background: var(--accent-warning); }
+.status-dot-offline     { background: var(--accent-danger); }
+
+.auth-version {
+  position: absolute;
+  bottom: var(--space-4);
+  right: var(--space-4);
   font-size: var(--text-2xs);
   color: var(--text-muted);
   font-family: var(--font-data);
   font-feature-settings: var(--font-data-features);
-  padding: var(--space-2) var(--space-3);
+  letter-spacing: 0.08em;
 }
 
-.launcher-main {
+/* ═══════════════════════════════════════════════════════════════
+   HOME SCREEN — header + main + footer dock
+═══════════════════════════════════════════════════════════════ */
+
+.home-screen {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.home-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-6);
+  background: var(--bg-recessed);
+  border-bottom: 1px solid var(--border-base);
+}
+
+.home-brand {
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--brand-gold);
+}
+
+.home-realm-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  cursor: default; /* dropdown wires up in PR 5 */
+}
+.realm-label {
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.realm-name {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+}
+
+.home-header-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  position: relative;
+}
+
+.header-icon-btn {
+  background: transparent;
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-base);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+}
+.header-icon-btn:hover {
+  background: var(--bg-raised);
+  border-color: var(--brand-gold);
+  color: var(--brand-gold);
+}
+.header-icon-btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.home-main {
   flex: 1;
   overflow-y: auto;
-  padding: var(--space-10);
+  padding: var(--space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
 }
 
-.placeholder-pane {
-  max-width: 32rem;
-}
-
-.placeholder-eyebrow {
+.home-section { display: flex; flex-direction: column; gap: var(--space-3); }
+.home-section-eyebrow {
   font-family: var(--font-display);
-  font-size: var(--text-xs);
+  font-size: var(--text-2xs);
+  font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--brand-gold);
-  margin-bottom: var(--space-3);
 }
 
-.placeholder-title {
-  font-family: var(--font-display);
-  font-size: var(--text-2xl);
-  font-weight: 500;
-  margin-bottom: var(--space-4);
+.home-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: var(--space-4) var(--space-8);
+  background: var(--bg-recessed);
+  border-top: 1px solid var(--border-base);
 }
 
-.placeholder-body {
-  color: var(--text-secondary);
+.play-button {
+  min-width: 8rem;
+  padding: var(--space-3) var(--space-10);
   font-size: var(--text-base);
-  line-height: 1.65;
+}
+
+.home-version {
+  position: absolute;
+  bottom: var(--space-2);
+  left: var(--space-3);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+
+.placeholder-pane    { padding: var(--space-6); }
+.placeholder-body    { color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.65; margin: 0; }
+.placeholder-body code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-recessed);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   POPOVER — account popover anchored to the header
+═══════════════════════════════════════════════════════════════ */
+
+.popover {
+  position: absolute;
+  top: calc(100% + var(--space-2));
+  right: 0;
+  min-width: 14rem;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--space-4);
+  z-index: 50;
+}
+
+.popover-eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: var(--space-1);
+}
+.popover-email {
+  font-size: var(--text-sm);
+  color: var(--text-primary);
+  word-break: break-all;
+}
+.popover-divider {
+  border: 0;
+  border-top: 1px solid var(--border-base);
+  margin: var(--space-3) 0;
+}
+.popover-action {
+  background: transparent;
+  border: 0;
+  color: var(--accent-danger);
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0;
+}
+.popover-action:hover { color: var(--text-primary); }
+
+/* The popover anchors against `.home-header-actions { position: relative }`,
+   so visually the right edge aligns with the gear icon. Adjust `right` here
+   if we ever change the header layout. */
+
+/* ═══════════════════════════════════════════════════════════════
+   MODAL — settings overlay
+═══════════════════════════════════════════════════════════════ */
+
+.modal-scrim {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  padding: var(--space-8);
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 36rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.modal-eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brand-gold);
+  margin-bottom: var(--space-1);
+}
+
+.modal-title {
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  font-weight: 500;
+  margin: 0;
+}
+
+.modal-close {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-size: var(--text-2xl);
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 var(--space-2);
+}
+.modal-close:hover { color: var(--brand-gold); }
+
+.modal-body { color: var(--text-secondary); }
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
 }
