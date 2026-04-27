@@ -1,0 +1,99 @@
+/* ═══════════════════════════════════════════════════════════════
+   DESIGN TOKENS  —  Phase 2 design system, mirrored from game + site.
+
+   Source of truth: project-remnant/docs/design.md
+   Game canonical: project-remnant/src/renderer/index.css :root
+   Site mirror:    project-remnant-site/src/styles/tokens.css
+
+   The launcher is a "close relative" of the site (which is itself a
+   close relative of the game). Same color seeds, same gold split,
+   same Fraunces+Inter pair. Launcher-specific divergences live below.
+═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* ── Backgrounds — the "4 strict" ─────────────────────────── */
+  --bg-base:     #0a070e;
+  --bg-surface:  #1d1620;
+  --bg-raised:   #2c2330;
+  --bg-recessed: #0e0a12;
+  --bg-overlay:  rgba(10, 7, 14, 0.78);
+
+  /* ── Text ────────────────────────────────────────────────── */
+  --text-primary:   #ece6d8;
+  --text-secondary: #c4baa8;
+  --text-muted:     #908880;
+  --text-disabled:  #5a5660;
+
+  /* ── Brand & currency (gold split) ───────────────────────── */
+  --brand-gold:    #d5a545;
+  --currency-gold: #d5a545;
+
+  /* ── Rarity ladder (parity; launcher doesn't surface items today) */
+  --rarity-common: #6a6a78;
+  --rarity-magic:  #2aaa60;
+  --rarity-rare:   #5888c8;
+  --rarity-epic:   #a855f7;
+  --rarity-racial: #4ba89c;
+
+  /* ── Semantic accents ────────────────────────────────────── */
+  --accent-info:    #5888c8;
+  --accent-success: #2aaa60;
+  --accent-warning: #c08a3a;
+  --accent-danger:  #c84040;
+  --accent-magic:   #a855f7;
+
+  /* ── Borders & focus ─────────────────────────────────────── */
+  --border-subtle:   rgba(255, 255, 255, 0.06);
+  --border-base:     rgba(255, 255, 255, 0.10);
+  --border-strong:   rgba(0, 0, 0, 0.55);
+  --focus-ring:      #d5a545;
+  --focus-ring-glow: rgba(213, 165, 69, 0.22);
+
+  /* ── Spacing scale ───────────────────────────────────────── */
+  --space-1:  0.2rem;
+  --space-2:  0.4rem;
+  --space-3:  0.6rem;
+  --space-4:  0.8rem;
+  --space-5:  1.0rem;
+  --space-6:  1.2rem;
+  --space-8:  1.6rem;
+  --space-10: 2.0rem;
+  --space-12: 2.4rem;
+  --space-16: 3.2rem;
+  --space-20: 4.0rem;
+  --space-24: 4.8rem;
+
+  /* ── Type scale ──────────────────────────────────────────── */
+  --text-2xs: 0.65rem;
+  --text-xs:  0.75rem;
+  --text-sm:  0.85rem;
+  --text-base: 1rem;
+  --text-md:  1.15rem;
+  --text-lg:  1.30rem;
+  --text-xl:  1.60rem;
+  --text-2xl: 2.00rem;
+  --text-3xl: 2.80rem;
+  --text-4xl: 4.00rem;
+
+  /* ── Font families ───────────────────────────────────────── */
+  /* Fraunces + Inter loaded via @fontsource in main.jsx. Same pair
+     as game and site for cross-product typographic continuity. */
+  --font-display: 'Fraunces Variable', Fraunces, Georgia, 'Times New Roman', serif;
+  --font-body:    'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono:    'JetBrains Mono', Consolas, 'Courier New', monospace;
+
+  --font-data:          'Inter', system-ui, sans-serif;
+  --font-data-features: "tnum" 1, "cv11" 1;
+  --font-size-data:     0.875rem;
+
+  /* ── Radii & shadows ─────────────────────────────────────── */
+  --radius-sm: 0.30rem;
+  --radius-md: 0.60rem;
+  --radius-lg: 0.92rem;
+  --radius-plate: 0.92rem;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.6);
+  --plate-shadow-base: 0 2px 4px rgba(0, 0, 0, 0.5), 0 12px 42px rgba(0, 0, 0, 0.55);
+}

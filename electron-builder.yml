@@ -1,0 +1,38 @@
+appId: com.projectremnant.launcher
+productName: Remnant Launcher
+artifactName: RemnantLauncher-Setup-${version}.${ext}
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - out/**/*
+  - package.json
+
+win:
+  target: nsis
+  icon: build/icon.ico
+
+# NSIS installer config — explicitly NOT one-click. The launcher is the
+# only thing players ever download, so the install location matters; let
+# them pick a drive (e.g. NVMe vs HDD). Industry-standard install UX.
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Remnant Launcher
+
+# electron-updater publishes drafts to a public release repo. PR 4 wires
+# the actual repo + the pnpm release:launcher flow; this stub is in
+# place so the manifest writer doesn't error during PR 1 builds.
+publish:
+  - provider: github
+    owner: bmtuer
+    repo: project-remnant-launcher-releases
+    releaseType: draft
+
+releaseInfo:
+  releaseName: v${version}

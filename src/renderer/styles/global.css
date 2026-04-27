@@ -1,0 +1,280 @@
+@import './tokens.css';
+
+/* Self-hosted fonts via @fontsource — same package + version range as
+   the site so we get the same visible faces. Variable Fraunces covers
+   weight + opsz axis; Inter ships per-weight (only the four we use). */
+@import '@fontsource-variable/fraunces';
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/inter/700.css';
+
+/* ═══════════════════════════════════════════════════════════════
+   BASE STYLES
+═══════════════════════════════════════════════════════════════ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-weight: 400;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+}
+
+html {
+  /* Baseline 13px at 960×640. ResizeObserver in App.jsx scales this
+     proportionally up to 16px max, mirroring the game's pattern. */
+  font-size: 13px;
+  color-scheme: dark;
+}
+
+body, #root, #app-root {
+  height: 100%;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  color: var(--text-primary);
+  margin: 0 0 var(--space-4) 0;
+}
+
+h1 { font-size: var(--text-3xl); }
+h2 { font-size: var(--text-2xl); }
+h3 { font-size: var(--text-xl); }
+h4 { font-size: var(--text-lg); }
+h5 { font-size: var(--text-md); }
+h6 { font-size: var(--text-base); }
+
+p {
+  margin: 0 0 var(--space-4) 0;
+}
+
+a {
+  color: var(--brand-gold);
+  text-decoration: none;
+  cursor: pointer;
+}
+a:hover { color: var(--text-primary); }
+a:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+input, textarea, select, button {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PLATE — A3a-with-whisper-grain primitive, mirrored from site
+   (which is mirrored from game §3.1).
+
+   Opaque --bg-surface body, hairline border, soft elevation. The
+   launcher uses this everywhere a "card on the page" is wanted —
+   sign-in form, realm tiles, patch-note containers, settings panel.
+═══════════════════════════════════════════════════════════════ */
+
+.plate {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-plate);
+  padding: var(--space-8);
+  box-shadow: var(--shadow-md);
+}
+
+.plate-compact {
+  padding: var(--space-6);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BUTTONS — primary (solid gold) + secondary (transparent + rim)
+   Lifted from site's .site-btn-* family.
+═══════════════════════════════════════════════════════════════ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-6);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.12s ease;
+}
+
+.btn-primary {
+  background: var(--brand-gold);
+  border-color: var(--brand-gold);
+  color: var(--bg-base);
+}
+.btn-primary:hover {
+  background: #b88a30;
+  border-color: #b88a30;
+  box-shadow: 0 0 0 3px var(--focus-ring-glow);
+}
+.btn-primary:active { transform: translateY(1px); }
+.btn-primary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.btn-secondary {
+  background: transparent;
+  border-color: var(--border-strong);
+  color: var(--text-secondary);
+}
+.btn-secondary:hover {
+  border-color: var(--brand-gold);
+  color: var(--brand-gold);
+}
+.btn-secondary:active { transform: translateY(1px); }
+.btn-secondary:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+
+.btn:disabled,
+.btn[aria-disabled='true'] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn:active { transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   APP SHELL  —  side nav + main pane layout
+═══════════════════════════════════════════════════════════════ */
+
+#app-root {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.launcher-nav {
+  width: 14rem;
+  flex-shrink: 0;
+  background: var(--bg-recessed);
+  border-right: 1px solid var(--border-base);
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-6) var(--space-4);
+  gap: var(--space-2);
+}
+
+.launcher-brand {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  color: var(--brand-gold);
+  letter-spacing: 0.04em;
+  padding: var(--space-2) var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.launcher-nav-item {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.launcher-nav-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-raised);
+}
+
+.launcher-nav-item.is-active {
+  color: var(--brand-gold);
+  background: var(--bg-surface);
+  border-color: var(--border-base);
+}
+
+.launcher-nav-spacer {
+  flex: 1;
+}
+
+.launcher-version {
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  padding: var(--space-2) var(--space-3);
+}
+
+.launcher-main {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-10);
+}
+
+.placeholder-pane {
+  max-width: 32rem;
+}
+
+.placeholder-eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--brand-gold);
+  margin-bottom: var(--space-3);
+}
+
+.placeholder-title {
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 500;
+  margin-bottom: var(--space-4);
+}
+
+.placeholder-body {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  line-height: 1.65;
+}
