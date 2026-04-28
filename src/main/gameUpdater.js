@@ -45,6 +45,20 @@ const GAME_STATE_FILE   = join(app.getPath('appData'), 'RemnantLauncher', 'game-
 // future Play clicks for the same key skip straight to spawn.
 const verifyCache = new Set();
 
+// In-flight tracking — keyed by env. Holds the Promise of the running
+// flow so concurrent callers (HomeScreen mount effect + App.jsx
+// minClientVersion subscriber + Socket.io reconnect re-fetch) all
+// dedupe to the same flow rather than racing each other and
+// stomping on the .tmp file mid-download.
+//
+// This guard lives in main (not the renderer's gameStore) because
+// the renderer's view of update.phase is async — by the time the
+// renderer's status reducer sees phase: 'manifest', a second IPC
+// request may already be in flight. Main is the only place that
+// can authoritatively know "a flow is currently running for this
+// env."
+const inFlightByEnv = new Map();
+
 function gameDirForEnv(env) {
   return join(GAME_INSTALL_ROOT, env);
 }
@@ -247,6 +261,30 @@ async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProg
  *                 percent?, version? } at each phase.
  */
 export async function verifyOrInstall({ apiBase, env, jwt, onStatus }) {
+  // Concurrent-call dedupe: if a flow is already running for this env,
+  // attach to that promise. The new caller still gets status events
+  // (the existing flow's onStatus is already wired to a renderer
+  // callback, but we ALSO surface a 'done' event to the late caller
+  // so its UI state machine settles correctly).
+  //
+  // Critical: this is the guard that prevents the .tmp file from
+  // being deleted mid-download by a parallel call. The renderer-side
+  // guard in gameStore is racy because update.phase doesn't reflect
+  // an in-flight IPC call until the first onStatus event lands.
+  const existing = inFlightByEnv.get(env);
+  if (existing) {
+    return existing;
+  }
+
+  const promise = runVerifyOrInstall({ apiBase, env, jwt, onStatus })
+    .finally(() => {
+      inFlightByEnv.delete(env);
+    });
+  inFlightByEnv.set(env, promise);
+  return promise;
+}
+
+async function runVerifyOrInstall({ apiBase, env, jwt, onStatus }) {
   const installed = await getInstalledVersion(env);
 
   // Session cache hit: we've already verified this version in this
@@ -302,6 +340,16 @@ export async function verifyOrInstall({ apiBase, env, jwt, onStatus }) {
  * the env first.
  */
 export async function forceRepair({ apiBase, env, jwt, onStatus }) {
+  // If a verify/install flow is already running for this env, attach
+  // to it rather than clearing state mid-flight (which would corrupt
+  // the active download). The user's intent of "repair" is satisfied
+  // by waiting for the in-flight verify to either fail (then they can
+  // re-click Repair) or succeed (which leaves them in the right state).
+  const existing = inFlightByEnv.get(env);
+  if (existing) {
+    return existing;
+  }
+
   // Clear cache + state so the install path runs unconditionally.
   for (const key of [...verifyCache]) {
     if (key.startsWith(`${env}@`)) verifyCache.delete(key);
