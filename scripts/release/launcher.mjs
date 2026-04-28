@@ -301,7 +301,12 @@ function isValidSemver(v) {
 
 function tryCountCommits(fromTag, toRef) {
   try {
-    const out = execSync(`git rev-list --count ${fromTag}..${toRef}`, { encoding: "utf8" });
+    // stdio: "pipe" suppresses git's stderr — first releases (no prior tag)
+    // log "fatal: ambiguous argument" otherwise, looking like a real error.
+    const out = execSync(`git rev-list --count ${fromTag}..${toRef}`, {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+    });
     return Number.parseInt(out.trim(), 10);
   } catch {
     return 0;

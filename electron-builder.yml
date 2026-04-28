@@ -6,9 +6,17 @@ directories:
   output: release
   buildResources: build
 
+# Explicit `files:` block was previously `out/**/* + package.json` only,
+# which broke runtime: electron-updater requires `debug` which requires
+# `ms`, both of which live under pnpm's flat .pnpm/ layout. Without
+# node_modules in the files glob, electron-builder packs the asar without
+# them and the launcher dies on startup with "Cannot find module 'ms'".
+# The defaults electron-builder uses when no `files:` is specified do
+# resolve pnpm symlinks correctly — we just need to spell out the glob.
 files:
   - out/**/*
   - package.json
+  - node_modules/**/*
 
 win:
   target: nsis
