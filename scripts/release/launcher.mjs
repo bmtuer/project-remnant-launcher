@@ -37,7 +37,7 @@ import {
   DraftValidationError,
 } from "./lib/changelog.mjs";
 import { openInEditor } from "./lib/editor.mjs";
-import { postChangelog, postLauncherDeployCard, postStagingRelease } from "./lib/discord.mjs";
+import { postChangelog, postLauncherDeployCard } from "./lib/discord.mjs";
 import { waitForDraftRelease, editReleaseBody, publishRelease } from "./lib/release.mjs";
 import { ask, confirm } from "./lib/prompt.mjs";
 import { loadConfig } from "./lib/config.mjs";
@@ -237,11 +237,15 @@ async function main() {
     console.log(changelogOk ? `  ✓ Posted to #changelog-staging` : `  ⚠ #changelog-staging post failed (non-fatal)`);
   }
 
-  // ── 12. Publish prompt + Discord deploy/announce posts ─────
+  // ── 12. Publish prompt + Discord deploy post ───────────────
+  // #staging-releases is reserved for game-client updates to the test
+  // server. Launcher releases ship silently — no #staging-releases post.
+  // The #deploys card still fires (deploy-channel is for engineering
+  // visibility across all repos).
   let publishedOk = false;
 
   if (DRY_RUN) {
-    console.log(`\n[DRY RUN] Would prompt to publish draft + post #deploys + (if published) post to #staging-releases`);
+    console.log(`\n[DRY RUN] Would prompt to publish draft + post #deploys`);
   } else {
     console.log(``);
     const shouldPublish = await confirm(
@@ -253,26 +257,15 @@ async function main() {
         publishRelease(tagName);
         publishedOk = true;
         console.log(`  ✓ Release published to players`);
-        const announceOk = await postStagingRelease(cfg.discordWebhookStagingReleases, {
-          version: newVersion,
-          publicNotes,
-          releaseUrl,
-          downloadUrl: cfg.launcherDownloadUrl,
-        });
-        console.log(announceOk
-          ? `  ✓ Posted rich card to #staging-releases`
-          : `  ⚠ #staging-releases post failed (release is live; post manually if needed)`);
       } catch (err) {
         console.error(`\n✗ gh release edit --draft=false failed: ${err.message}`);
         console.error(`\nThe draft is still up on GitHub. You can publish manually at:`);
         console.error(`  ${releaseUrl}`);
-        console.error(`Then paste the public notes to #staging-releases yourself.`);
         console.error(`(The #deploys card will still be posted with state=draft so the record is honest.)\n`);
       }
     } else {
       console.log(`  ↳ Skipped. Draft remains at ${releaseUrl}`);
       console.log(`    Publish it manually via gh release edit --draft=false or the GitHub UI.`);
-      console.log(`    Remember to post the notes to #staging-releases yourself.`);
     }
 
     const commitCount = tryCountCommits(`v${currentVersion}`, "HEAD");

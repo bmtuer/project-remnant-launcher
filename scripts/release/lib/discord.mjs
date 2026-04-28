@@ -83,49 +83,6 @@ export async function postLauncherDeployCard(
 }
 
 /**
- * Post the public patch notes when a launcher release is published
- * to players. Channel: #staging-releases.
- *
- * Title prefix differentiates from game-client posts that share this
- * channel (per plan's channel-rewiring section: #staging-releases is
- * now both products' player-facing announcements).
- *
- * Card link target — TWO links:
- *   - "Download the launcher" → site URL (the actionable CTA — players
- *     who don't have it yet can install fresh; players who do have it
- *     get the auto-update path)
- *   - "Release notes on GitHub" → releaseUrl (for the curious; works
- *     because the launcher-releases repo is public)
- *
- * Bryan-side decision (PR 6 cutover, 2026-04-27): the player-facing
- * card lives in our chrome (the site download URL) so we can swap
- * GitHub for Steam later without breaking player-shared links. The
- * GitHub link stays as a secondary affordance for transparency.
- */
-export async function postStagingRelease(
-  webhookUrl,
-  { version, publicNotes, releaseUrl, downloadUrl },
-) {
-  const footer = downloadUrl
-    ? `\n\n[Download the launcher](${downloadUrl}) · [Release notes on GitHub](${releaseUrl})`
-    : `\n\n[Full release →](${releaseUrl})`;
-  const max = 4096 - footer.length;
-  const description =
-    publicNotes.length > max
-      ? publicNotes.slice(0, max - 20) + "\n\n_(truncated)_" + footer
-      : publicNotes + footer;
-
-  const embed = {
-    color: LAUNCHER_TEAL,
-    title: `Launcher v${version} published`,
-    description,
-    footer: { text: "Already-installed launchers self-update automatically on next restart." },
-    timestamp: new Date().toISOString(),
-  };
-  return postEmbed(webhookUrl, embed);
-}
-
-/**
  * Post the internal changelog for a launcher release.
  * Channel: #changelog-staging.
  *
