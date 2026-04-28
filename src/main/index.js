@@ -11,6 +11,7 @@ import {
 import { startIpcServer, stopIpcServer, getPipePath } from './ipcServer.js';
 import { startLauncherUpdater, quitAndInstallLauncher } from './launcherUpdater.js';
 import { readSettings, writeSettings, peekSettings, syncAutoLaunch } from './settingsStore.js';
+import { verifyOrInstall, forceRepair, getInstalledVersion } from './gameUpdater.js';
 
 // ─── Single-instance lock ─────────────────────────────────────────────
 // Required for the `remnant://` protocol handoff. When the game spawns
@@ -260,6 +261,65 @@ function registerIpc() {
   });
 
   ipcMain.handle('game:isRunning', () => isGameRunning());
+
+  // ─── Game-update IPC ──────────────────────────────────────────────
+  // verifyOrInstall is the launcher's single entry point for "make
+  // sure the game is the right version on disk." Renderer calls this
+  // before every Play (with a session-cache fast-path), and Repair
+  // calls forceRepair which is the same path with the version-match
+  // early-out skipped.
+  //
+  // Status events stream back via 'game-update:status' as the flow
+  // progresses: manifest → verifying → downloading (with percent) →
+  // installing → done. Renderer's Play button reads these to drive
+  // its state machine (PLAY / VERIFYING / UPDATING).
+  ipcMain.handle('game:verifyOrInstall', async (_e, args) => {
+    const { apiBase, env, jwt } = args ?? {};
+    if (!apiBase || !env || !jwt) {
+      return { ok: false, error: 'Missing apiBase / env / jwt' };
+    }
+    try {
+      const result = await verifyOrInstall({
+        apiBase, env, jwt,
+        onStatus: (status) => {
+          mainWindow?.webContents.send('game-update:status', status);
+        },
+      });
+      return { ok: true, ...result };
+    } catch (err) {
+      mainWindow?.webContents.send('game-update:status', {
+        phase: 'error',
+        message: err?.message ?? 'Update failed',
+      });
+      return { ok: false, error: err?.message ?? 'Update failed' };
+    }
+  });
+
+  ipcMain.handle('game:forceRepair', async (_e, args) => {
+    const { apiBase, env, jwt } = args ?? {};
+    if (!apiBase || !env || !jwt) {
+      return { ok: false, error: 'Missing apiBase / env / jwt' };
+    }
+    try {
+      const result = await forceRepair({
+        apiBase, env, jwt,
+        onStatus: (status) => {
+          mainWindow?.webContents.send('game-update:status', status);
+        },
+      });
+      return { ok: true, ...result };
+    } catch (err) {
+      mainWindow?.webContents.send('game-update:status', {
+        phase: 'error',
+        message: err?.message ?? 'Repair failed',
+      });
+      return { ok: false, error: err?.message ?? 'Repair failed' };
+    }
+  });
+
+  ipcMain.handle('game:getInstalledVersion', (_e, env) => {
+    return getInstalledVersion(env ?? 'test');
+  });
 
   // ─── Launcher self-update IPC ─────────────────────────────────────
   // Renderer subscribes to `launcher:update-status` events emitted by

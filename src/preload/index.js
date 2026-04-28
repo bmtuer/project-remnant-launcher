@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('launcher', {
 
   // Game lifecycle. PR 2 wires spawn + exit-event subscription; PR 5
   // adds the version-gate sequence, the realm picker dropdown, and
-  // the differential-update flow before spawn.
+  // the install/verify/update flow before spawn.
   game: {
     spawn:     (bundle) => ipcRenderer.invoke('game:spawn', bundle),
     isRunning: () => ipcRenderer.invoke('game:isRunning'),
@@ -31,6 +31,24 @@ contextBridge.exposeInMainWorld('launcher', {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('game:spawn-error', listener);
       return () => ipcRenderer.removeListener('game:spawn-error', listener);
+    },
+
+    // Version + verify/install. The Play button calls verifyOrInstall
+    // before spawn to ensure the local game matches the server's
+    // latest version. Repair button (Settings) calls forceRepair to
+    // unconditionally reinstall.
+    //
+    // Status events stream as 'game-update:status' with phase:
+    //   manifest | verifying | downloading | installing | done | error
+    // Renderer subscribes to this to drive the Play button state
+    // machine + the progress UI.
+    verifyOrInstall: (args) => ipcRenderer.invoke('game:verifyOrInstall', args),
+    forceRepair:     (args) => ipcRenderer.invoke('game:forceRepair', args),
+    getInstalledVersion: (env) => ipcRenderer.invoke('game:getInstalledVersion', env),
+    onUpdateStatus: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('game-update:status', listener);
+      return () => ipcRenderer.removeListener('game-update:status', listener);
     },
   },
 
