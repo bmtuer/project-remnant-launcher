@@ -6,6 +6,7 @@ import { useGameStore } from '../store/gameStore.js';
 import AccountPopover from '../components/AccountPopover.jsx';
 import SettingsModal  from '../components/SettingsModal.jsx';
 import PatchNotesModal from '../components/PatchNotesModal.jsx';
+import { AccountIcon, SettingsIcon } from '../components/icons.jsx';
 import launcherHeroUrl from '../assets/launcher-hero.webp';
 import { relativeDate } from '../utils/relativeDate.js';
 
@@ -93,7 +94,7 @@ export default function HomeScreen() {
             aria-label={`Account: ${email ?? 'signed in'}`}
             onClick={toggleAccountPopover}
           >
-            <span aria-hidden="true">👤</span>
+            <AccountIcon />
           </button>
           <AccountPopover />
           <button
@@ -102,7 +103,7 @@ export default function HomeScreen() {
             aria-label="Settings"
             onClick={openSettings}
           >
-            <span aria-hidden="true">⚙</span>
+            <SettingsIcon />
           </button>
         </div>
       </header>

@@ -446,21 +446,27 @@ input:disabled { opacity: 0.55; }
 }
 
 /* Ghost icon buttons — no border, color-shift on hover. Reads as
-   header chrome rather than a nest of widgets. PR 4 will swap the
-   emoji glyphs for SVG icons; the button shape stays. */
+   header chrome rather than a nest of widgets. SVG icons via
+   currentColor so they inherit the button's color rules. */
 .header-icon-btn {
   background: transparent;
   border: 0;
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: var(--brand-gold);
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-base);
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   transition: background 0.2s ease, color 0.2s ease;
 }
 .header-icon-btn:hover {
   background: var(--bg-raised);
-  color: var(--brand-gold);
+  /* Slightly brighter on hover. The launcher's --brand-gold is a
+     muted gold; brightening it here gives a tactile cue without
+     introducing a new color. */
+  color: #e6c068;
 }
 .header-icon-btn:focus-visible {
   outline: 2px solid var(--focus-ring);
