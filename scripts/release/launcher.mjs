@@ -254,7 +254,10 @@ async function main() {
         publishedOk = true;
         console.log(`  ✓ Release published to players`);
         const announceOk = await postStagingRelease(cfg.discordWebhookStagingReleases, {
-          version: newVersion, publicNotes, releaseUrl,
+          version: newVersion,
+          publicNotes,
+          releaseUrl,
+          downloadUrl: cfg.launcherDownloadUrl,
         });
         console.log(announceOk
           ? `  ✓ Posted rich card to #staging-releases`
