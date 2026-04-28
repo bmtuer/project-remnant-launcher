@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore, useIsLauncherStale } from '../store/appStore.js';
+import { useRealmStore } from '../store/realmStore.js';
 import { SITE_URLS } from '../constants.js';
 
 export default function AuthScreen() {
@@ -55,12 +56,9 @@ export default function AuthScreen() {
                     openExternal={openExternal}
                   />}
 
-        {/* Server-status strip — PR 5 wires real /api/v1/launcher/realms data.
-            Static placeholder for now so the layout reads correctly. */}
-        <div className="auth-server-strip">
-          <span className="status-dot status-dot-online" aria-hidden="true" />
-          Test Realm — checking…
-        </div>
+        {/* Server-status strip — driven by realmStore. /launcher/realms
+            is public so it's available pre-auth. */}
+        <ServerStatusStrip />
       </div>
 
       <div className="auth-version">v{version || '0.0.0'}</div>
@@ -144,6 +142,65 @@ function StaleLauncherCard({ updateStatus, onRestart }) {
       >
         {ready ? 'Restart & Install' : 'Waiting for update…'}
       </button>
+    </div>
+  );
+}
+
+// Live realm status strip — shown below the auth card so players can
+// see server availability before signing in (industry pattern, mirrors
+// Battle.net / Riot). Sources from realmStore which App.jsx loads on
+// boot (the /launcher/realms endpoint is public — no JWT required).
+//
+// v1: single Test Realm. When Live Realm lands at Phase 3, we may
+// want to render multiple status pills here, or summarize across
+// realms (e.g. "All realms online"). For v1, just show the single
+// realm + its status.
+//
+// Status → status dot color mapping mirrors the existing
+// .status-dot-* CSS classes from PR 2.
+function ServerStatusStrip() {
+  const realms  = useRealmStore((s) => s.realms);
+  const loading = useRealmStore((s) => s.loading);
+  const error   = useRealmStore((s) => s.error);
+
+  if (loading && realms.length === 0) {
+    return (
+      <div className="auth-server-strip">
+        <span className="status-dot" aria-hidden="true" style={{ background: 'var(--text-muted)' }} />
+        Connecting…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="auth-server-strip">
+        <span className="status-dot status-dot-offline" aria-hidden="true" />
+        Server unreachable
+      </div>
+    );
+  }
+  if (realms.length === 0) {
+    return null; // Loaded clean but empty — odd, but show nothing rather than a stale string
+  }
+
+  // v1: show the first realm's status. Future multi-realm UX can
+  // iterate or summarize.
+  const realm = realms[0];
+  const dotClass = {
+    online:      'status-dot-online',
+    maintenance: 'status-dot-maintenance',
+    offline:     'status-dot-offline',
+  }[realm.status] ?? 'status-dot-offline';
+  const statusLabel = {
+    online:      'online',
+    maintenance: 'maintenance',
+    offline:     'offline',
+  }[realm.status] ?? realm.status;
+
+  return (
+    <div className="auth-server-strip">
+      <span className={`status-dot ${dotClass}`} aria-hidden="true" />
+      {realm.name} — {statusLabel}
     </div>
   );
 }

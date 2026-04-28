@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore }  from './store/appStore.js';
 import { useGameStore } from './store/gameStore.js';
+import { useRealmStore } from './store/realmStore.js';
 import BootScreen from './screens/BootScreen.jsx';
 import AuthScreen from './screens/AuthScreen.jsx';
 import HomeScreen from './screens/HomeScreen.jsx';
@@ -21,6 +22,7 @@ export default function App() {
   const signOut           = useAppStore((s) => s.signOut);
   const setUpdateStatus   = useAppStore((s) => s.setUpdateStatus);
   const loadServerStatus  = useAppStore((s) => s.loadServerStatus);
+  const loadRealms        = useRealmStore((s) => s.load);
 
   // Rem-scaling — mirrors project-remnant/src/renderer/App.jsx:144-156
   // baselined for the launcher window: 960×640 → 13px root. Min/max clamp
@@ -47,6 +49,12 @@ export default function App() {
   // status endpoint is unauthenticated; runs in parallel with hydrate.
   // Socket.io will keep this fresh in PR 4's next commit.
   useEffect(() => { loadServerStatus(); }, [loadServerStatus]);
+
+  // Boot — fetch realm list. /launcher/realms is public (no JWT
+  // required), so this works PRE-auth. The auth screen's server-status
+  // strip reads from this; without an early load it would say
+  // "checking…" forever.
+  useEffect(() => { loadRealms(); }, [loadRealms]);
 
   // Tray "Sign Out" routes here.
   useEffect(() => {
