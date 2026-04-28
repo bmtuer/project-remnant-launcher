@@ -1,6 +1,6 @@
 {
   "name": "project-remnant-launcher",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Standalone Electron launcher for Project Remnant — sign-in, realm picker, game-binary distribution.",
   "main": "out/main/index.js",
   "packageManager": "pnpm@10.33.0",
