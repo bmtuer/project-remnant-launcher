@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore.js';
+import { useGameStore } from '../store/gameStore.js';
 
 // Sign-out lives ONLY in the account popover — single canonical path.
 // Settings is a settings panel; duplicating destructive actions across
@@ -172,23 +173,13 @@ export default function SettingsModal() {
                 </select>
               </SettingRow>
 
-              {/* Repair Game — placeholder until PR 5 ships the
-                  game-binary installer + sha512 verify path. The
-                  button is wired for future use; today it's disabled. */}
-              <SettingRow
-                label="Repair game"
-                hint="Verify and restore game files."
-              >
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  disabled
-                  aria-disabled="true"
-                  title="Coming in a future update"
-                >
-                  Repair…
-                </button>
-              </SettingRow>
+              {/* Repair Game — wired in PR 5. Forces a sha512-verified
+                  reinstall of the active realm's game binary regardless
+                  of session-cache state. Same gameUpdater path as the
+                  auto-verify-on-Play flow; UI feedback shows up in the
+                  HomeScreen's footer progress strip via the shared
+                  game-update:status events. */}
+              <RepairRow />
 
               {error && (
                 <div className="settings-error" role="alert">{error}</div>
@@ -268,5 +259,56 @@ function RadioGroup({ name, value, options, busy, onChange }) {
         </button>
       ))}
     </div>
+  );
+}
+
+// Repair row — calls gameStore.forceRepairActive() which kicks off a
+// sha512-verified reinstall via the same gameUpdater path the auto-
+// verify-on-Play flow uses. Progress feedback lives in HomeScreen's
+// footer progress strip (driven by the shared game-update:status
+// events), so this button itself just triggers the flow + reflects
+// in-progress state.
+//
+// Disabled when an update flow is already active (avoids double-
+// triggering). On error, the gameStore exposes update.error which
+// the HomeScreen's strip can surface; this row also disables until
+// the flow ends.
+function RepairRow() {
+  const updatePhase  = useGameStore((s) => s.update.phase);
+  const forceRepair  = useGameStore((s) => s.forceRepairActive);
+  const closeSettings = useAppStore((s) => s.closeSettings);
+
+  const inProgress = (
+    updatePhase === 'manifest' ||
+    updatePhase === 'verifying' ||
+    updatePhase === 'downloading' ||
+    updatePhase === 'installing'
+  );
+  const label = inProgress ? 'Repairing…' : 'Repair…';
+
+  const onClick = async () => {
+    // Close Settings so the player can see the home-screen progress
+    // strip while the repair runs. The strip carries the same status
+    // info the modal would, with more visual presence.
+    closeSettings();
+    await forceRepair();
+  };
+
+  return (
+    <SettingRow
+      label="Repair game"
+      hint="Verify and restore game files."
+    >
+      <button
+        type="button"
+        className="btn btn-secondary"
+        onClick={onClick}
+        disabled={inProgress}
+        aria-disabled={inProgress}
+        title={inProgress ? 'Repair in progress…' : 'Verify and restore game files'}
+      >
+        {label}
+      </button>
+    </SettingRow>
   );
 }

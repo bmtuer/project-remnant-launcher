@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../store/appStore.js';
 import { useContentStore } from '../store/contentStore.js';
+import { useRealmStore, useActiveRealm } from '../store/realmStore.js';
+import { useGameStore } from '../store/gameStore.js';
 import AccountPopover from '../components/AccountPopover.jsx';
 import SettingsModal  from '../components/SettingsModal.jsx';
 import PatchNotesModal from '../components/PatchNotesModal.jsx';
 import launcherHeroUrl from '../assets/launcher-hero.webp';
 import { relativeDate } from '../utils/relativeDate.js';
 
-// Capitalize a kind for the tag pill ("maintenance" → "Maintenance").
 const KIND_LABELS = {
   maintenance: 'Maintenance',
   notice:      'Notice',
@@ -28,31 +29,61 @@ export default function HomeScreen() {
   const contentError    = useContentStore((s) => s.error);
   const loadContent     = useContentStore((s) => s.load);
 
+  const realms          = useRealmStore((s) => s.realms);
+  const selectedRealmId = useRealmStore((s) => s.selectedRealmId);
+  const selectRealm     = useRealmStore((s) => s.selectRealm);
+  const loadRealms      = useRealmStore((s) => s.load);
+  const activeRealm     = useActiveRealm();
+
+  const installedVersionByEnv = useGameStore((s) => s.installedVersionByEnv);
+  const updateState           = useGameStore((s) => s.update);
+  const verifyOrInstallActive = useGameStore((s) => s.verifyOrInstallActive);
+  const loadInstalledVersion  = useGameStore((s) => s.loadInstalledVersion);
+
   const [openPatchNote, setOpenPatchNote] = useState(null);
 
-  // Launcher version moved to Settings modal — bottom-left of the
-  // launcher window is reserved for the GAME version (PR 5 will wire
-  // it once the game-binary install path lands).
-
-  // Load announcements + patch-notes on mount. The store is idempotent
-  // (skips if already loading); subsequent home re-mounts (e.g. after
-  // a sign-out → sign-in cycle) refetch cleanly.
+  // Mount: load content + realms + installed version.
   useEffect(() => { loadContent(); }, [loadContent]);
+  useEffect(() => { loadRealms(); }, [loadRealms]);
+  useEffect(() => {
+    if (selectedRealmId) loadInstalledVersion(selectedRealmId);
+  }, [selectedRealmId, loadInstalledVersion]);
+
+  // Background verify/install on home mount + on realm change. The
+  // main-process session cache makes the second-onwards call cheap
+  // (just a manifest fetch + version-string compare). On a fresh
+  // launcher boot or a different realm with no install, this is the
+  // path that downloads the game binary.
+  useEffect(() => {
+    if (appState !== 'home') return;
+    if (!selectedRealmId) return;
+    verifyOrInstallActive();
+  }, [appState, selectedRealmId, verifyOrInstallActive]);
+
+  const installedVersion = selectedRealmId ? installedVersionByEnv[selectedRealmId] : null;
+
+  // ── Play button state machine ─────────────────────────────────
+  // Folds: realm status, app-state (playing / not), update phase,
+  // and version-vs-installed comparison into a single discriminator.
+  const playStatus = derivePlayStatus({
+    appState,
+    activeRealm,
+    updatePhase: updateState.phase,
+    updatePercent: updateState.percent,
+  });
 
   return (
     <div className="home-screen">
       <header className="home-header">
         <div className="home-brand">PROJECT REMNANT</div>
 
-        {/* Realm picker — the chevron + dropdown wire up in PR 5. The
-            realm label sits OUTSIDE the chip so the chip itself is
-            "the value, click to change." */}
         <div className="home-realm" aria-label="Realm">
           <span className="home-realm-label">Realm</span>
-          <button type="button" className="home-realm-chip" disabled>
-            <span className="home-realm-name">Test Realm</span>
-            <span className="home-realm-chevron" aria-hidden="true">▾</span>
-          </button>
+          <RealmSelect
+            realms={realms}
+            value={selectedRealmId}
+            onChange={selectRealm}
+          />
         </div>
 
         <div className="home-header-actions">
@@ -79,10 +110,6 @@ export default function HomeScreen() {
       <main className="home-main">
         <div className="home-content-row">
           <div className="home-content-stack">
-            {/* Announcements — primary content. Server returns top 5
-                active+unexpired ordered DESC; we render them all. When
-                zero rows (or initial load), we omit the section so
-                patch notes own more vertical space. */}
             {(announcements.length > 0 || contentLoading) && (
               <section className="home-announcements" aria-labelledby="announcements-heading">
                 <div className="home-section-eyebrow" id="announcements-heading">
@@ -120,9 +147,6 @@ export default function HomeScreen() {
               </section>
             )}
 
-            {/* Patch notes — fixed 3-card grid (server caps at 3).
-                Click a card → opens PatchNotesModal with the version's
-                full entries[]. */}
             <section className="home-patch-rail" aria-labelledby="patch-rail-heading">
               <div className="home-section-eyebrow" id="patch-rail-heading">
                 Patch Notes
@@ -139,10 +163,6 @@ export default function HomeScreen() {
                   </div>
                 )}
                 {patchNotes.map((note) => (
-                  // Card is intentionally minimal — version + date.
-                  // No derived headline (the previous "first NEW
-                  // entry" pattern was brittle since entries[0] could
-                  // be anything). Players click to read what changed.
                   <button
                     key={note.id}
                     type="button"
@@ -162,8 +182,6 @@ export default function HomeScreen() {
             </section>
           </div>
 
-          {/* Shared hero — single image at src/renderer/assets/launcher-hero.webp,
-              spanning the full content-row height. */}
           <aside
             className="home-hero"
             style={{ backgroundImage: `url(${launcherHeroUrl})` }}
@@ -173,15 +191,22 @@ export default function HomeScreen() {
       </main>
 
       <footer className="home-footer">
+        {/* Progress strip — only renders during active update flows.
+            When idle/done, the footer just has the Play button on
+            the right. */}
+        <UpdateProgressStrip update={updateState} />
         <button
           type="button"
-          className="btn btn-primary play-button"
-          onClick={launchGame}
-          disabled={appState === 'playing'}
-          aria-disabled={appState === 'playing'}
-          title={appState === 'playing' ? 'Game is running' : 'Launch the game'}
+          className={`btn play-button ${playStatus.btnClass}`}
+          onClick={() => {
+            if (playStatus.disabled) return;
+            launchGame();
+          }}
+          disabled={playStatus.disabled}
+          aria-disabled={playStatus.disabled}
+          title={playStatus.title}
         >
-          {appState === 'playing' ? 'Playing…' : 'Play'}
+          {playStatus.label}
         </button>
       </footer>
 
@@ -193,7 +218,150 @@ export default function HomeScreen() {
         />
       )}
 
-      {/* Bottom-left corner reserved for game version (PR 5). */}
+      {/* Bottom-left corner — game version readout. Mirrors the launcher
+          version's prior placement; this slot now carries what players
+          actually look for ("am I on v0.7.4?"). Empty until a game has
+          been installed. */}
+      {installedVersion && (
+        <div className="home-game-version" aria-label={`Game version ${installedVersion}`}>
+          Game v{installedVersion}
+        </div>
+      )}
     </div>
   );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────
+
+/** Realm <select> — wraps the existing .home-realm-chip styling but
+ *  uses a native select so dropdown chrome is OS-correct. The single-
+ *  realm v1 case still renders the dropdown (player can see the
+ *  available realm); when Live Realm lands at Phase 3 it just shows
+ *  in the options without code change. */
+function RealmSelect({ realms, value, onChange }) {
+  if (realms.length === 0) {
+    // Pre-fetch / fetch-failed: render a non-interactive placeholder
+    // so the layout doesn't shift when realms load.
+    return (
+      <button type="button" className="home-realm-chip" disabled>
+        <span className="home-realm-name">…</span>
+      </button>
+    );
+  }
+  return (
+    <select
+      className="home-realm-chip home-realm-select"
+      value={value ?? ''}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      {realms.map((r) => (
+        <option key={r.id} value={r.id}>
+          {r.name}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/** Footer progress strip. Renders during active update phases; hidden
+ *  when idle / done / error. accent-info bar over bg-recessed track,
+ *  matches the LauncherUpdateBanner from PR 4 for visual consistency
+ *  across the two update flows. */
+function UpdateProgressStrip({ update }) {
+  const { phase, percent, downloaded, total, version } = update;
+  if (phase === 'idle' || phase === 'done') return null;
+
+  const labelByPhase = {
+    manifest:   'Checking for updates…',
+    verifying:  'Verifying files…',
+    downloading: version ? `Downloading v${version}…` : 'Downloading update…',
+    installing: 'Installing…',
+    error:      'Update failed',
+  };
+  const label = labelByPhase[phase] ?? '';
+
+  // "downloading" + "installing" can show real percent. Other phases
+  // get an indeterminate shimmer (no percent rendered).
+  const showPercent = phase === 'downloading' || phase === 'installing';
+  const showIndeterminate = phase === 'manifest' || phase === 'verifying';
+
+  return (
+    <div className="home-update-strip" role="status" aria-live="polite">
+      <span className="home-update-label">{label}</span>
+      <div className={`home-update-track${showIndeterminate ? ' is-indeterminate' : ''}`} aria-hidden="true">
+        <div
+          className="home-update-fill"
+          style={showPercent ? { width: `${percent ?? 0}%` } : undefined}
+        />
+      </div>
+      {showPercent && (
+        <span className="home-update-percent">
+          {percent ?? 0}%
+          {downloaded > 0 && total > 0 && (
+            <>
+              {' · '}
+              <span className="home-update-bytes">
+                {fmtMB(downloaded)} / {fmtMB(total)}
+              </span>
+            </>
+          )}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function fmtMB(bytes) {
+  if (!bytes) return '0 MB';
+  return `${(bytes / 1024 / 1024).toFixed(0)} MB`;
+}
+
+/** Decide the Play button's text + disabled state + title from the
+ *  combined launcher+realm+update state. Pure function — easy to test. */
+function derivePlayStatus({ appState, activeRealm, updatePhase, updatePercent }) {
+  if (appState === 'playing') {
+    return { label: 'Playing…', disabled: true, btnClass: 'btn-secondary',
+             title: 'Game is running' };
+  }
+
+  // Realm-status gates BEFORE update gates — if the realm is down,
+  // a green binary doesn't help.
+  const realmStatus = activeRealm?.status ?? null;
+  if (realmStatus === 'maintenance') {
+    return { label: 'Maintenance', disabled: true, btnClass: 'btn-secondary',
+             title: 'Server is in maintenance mode' };
+  }
+  if (realmStatus === 'offline') {
+    return { label: 'Offline', disabled: true, btnClass: 'btn-secondary',
+             title: 'Server is offline' };
+  }
+
+  // Update gates.
+  if (updatePhase === 'manifest' || updatePhase === 'verifying') {
+    return { label: 'Verifying…', disabled: true, btnClass: 'btn-primary',
+             title: 'Checking game files…' };
+  }
+  if (updatePhase === 'downloading') {
+    const pct = updatePercent ?? 0;
+    return { label: `Updating ${pct}%`, disabled: true, btnClass: 'btn-primary',
+             title: `Downloading update (${pct}%)` };
+  }
+  if (updatePhase === 'installing') {
+    return { label: 'Installing…', disabled: true, btnClass: 'btn-primary',
+             title: 'Installing update…' };
+  }
+  if (updatePhase === 'error') {
+    return { label: 'Retry', disabled: false, btnClass: 'btn-primary',
+             title: 'Last update failed — click to retry' };
+  }
+
+  // No realm yet (loading), no update in progress, no error — disabled.
+  if (!activeRealm) {
+    return { label: 'Play', disabled: true, btnClass: 'btn-primary',
+             title: 'Loading realm list…' };
+  }
+
+  // Happy path.
+  return { label: 'Play', disabled: false, btnClass: 'btn-primary',
+           title: 'Launch the game' };
 }

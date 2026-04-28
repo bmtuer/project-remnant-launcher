@@ -413,12 +413,28 @@ input:disabled { opacity: 0.55; }
 .home-realm-chip:hover { border-color: var(--brand-gold); }
 .home-realm-chip:disabled {
   cursor: default;
-  opacity: 0.85; /* not really disabled-looking — just non-interactive until PR 5 */
+  opacity: 0.85; /* loading / pre-fetch state */
 }
 .home-realm-chip:disabled:hover { border-color: var(--border-base); }
 .home-realm-chevron {
   color: var(--text-muted);
   font-size: var(--text-xs);
+}
+
+/* The realm select: a native <select> styled to match the chip
+   recipe so OS dropdown chrome (chevron, picker UI) is correct
+   without us reimplementing it. */
+.home-realm-select {
+  appearance: auto;
+  -webkit-appearance: auto;
+  cursor: pointer;
+  /* Native chevron is already there; hide our manual one if any */
+  padding-right: var(--space-3);
+}
+.home-realm-select:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+  border-color: var(--brand-gold);
 }
 
 .home-header-actions {
@@ -713,6 +729,7 @@ input:disabled { opacity: 0.55; }
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: var(--space-6);
   padding: var(--space-4) var(--space-8);
   background: var(--bg-recessed);
   border-top: 1px solid var(--border-base);
@@ -722,11 +739,93 @@ input:disabled { opacity: 0.55; }
   min-width: 8rem;
   padding: var(--space-3) var(--space-10);
   font-size: var(--text-base);
+  flex-shrink: 0;
 }
 
-/* .home-version retired — launcher version moved into Settings.
-   Bottom-left of the launcher window is reserved for the GAME
-   version once PR 5 wires the game-binary install path. */
+/* Game version readout — bottom-left corner of the home screen.
+   Sources from gameStore.installedVersionByEnv. Only renders when
+   a game is installed (no value before first install). Mirrors the
+   prior launcher-version slot's chrome but carries what players
+   actually look for. Font: Fraunces tabular like the patch-card
+   version, --text-muted to read as quiet metadata. */
+.home-game-version {
+  position: absolute;
+  bottom: var(--space-3);
+  left: var(--space-4);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  letter-spacing: 0.06em;
+  pointer-events: none;
+}
+
+/* Footer progress strip — left of the Play button. Renders during
+   active update phases (manifest / verifying / downloading /
+   installing). Hidden when idle / done / error. Reuses the
+   accent-info palette from the launcher self-update banner so the
+   two flows look like the same family. */
+.home-update-strip {
+  flex: 1;
+  max-width: 28rem;
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.home-update-label {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+.home-update-track {
+  flex: 1;
+  height: 0.4rem;
+  background: var(--bg-base);
+  border: 1px solid var(--border-base);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  position: relative;
+}
+.home-update-fill {
+  height: 100%;
+  background: var(--accent-info);
+  transition: width 0.2s ease;
+}
+/* Indeterminate shimmer for phases that don't have a meaningful
+   percent (manifest fetch, sha512 verify). The fill animates back
+   and forth across the track to communicate "working, no specific
+   progress to report yet." */
+.home-update-track.is-indeterminate .home-update-fill {
+  width: 30%;
+  animation: indeterminate 1.4s ease-in-out infinite;
+}
+@keyframes indeterminate {
+  0%   { transform: translateX(-100%); }
+  50%  { transform: translateX(150%); }
+  100% { transform: translateX(-100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .home-update-track.is-indeterminate .home-update-fill {
+    animation: none;
+    width: 100%;
+    opacity: 0.4;
+  }
+}
+.home-update-percent {
+  font-family: var(--font-data);
+  font-feature-settings: var(--font-data-features);
+  font-size: var(--text-2xs);
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.home-update-bytes {
+  color: var(--text-muted);
+}
 
 .placeholder-pane    { padding: var(--space-6); }
 .placeholder-body    { color: var(--text-secondary); font-size: var(--text-sm); line-height: 1.65; margin: 0; }

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useAppStore }  from './store/appStore.js';
+import { useGameStore } from './store/gameStore.js';
 import BootScreen from './screens/BootScreen.jsx';
 import AuthScreen from './screens/AuthScreen.jsx';
 import HomeScreen from './screens/HomeScreen.jsx';
@@ -61,6 +62,47 @@ export default function App() {
     });
     return () => off?.();
   }, [setUpdateStatus]);
+
+  // Game-update status events. Subscribe once at boot; main fires
+  // `game-update:status` during verifyOrInstall / forceRepair flows.
+  // gameStore.applyStatus normalizes phase + percent + downloaded,
+  // and on `done` triggers a refresh of installedVersion so the
+  // bottom-left readout updates without manual reload.
+  useEffect(() => {
+    const off = window.launcher?.game?.onUpdateStatus?.((payload) => {
+      useGameStore.getState().applyStatus(payload);
+    });
+    return () => off?.();
+  }, []);
+
+  // Live-ops cache-invalidation: when the server's minClientVersion
+  // changes (admin published a new game release while we were sitting
+  // on home), trigger a background re-verify. The main-process
+  // gameUpdater session cache misses on the new version → manifest
+  // fetch → download. Player sees the Play button auto-transition
+  // through VERIFYING / UPDATING states without doing anything.
+  // First-load: minClientVersion fetch from /status fires before
+  // we reach `home`, so the first compare here is "null → real value"
+  // which we deliberately skip (no kick on first known version).
+  const lastSeenMinVersion = useRef(null);
+  useEffect(() => {
+    return useAppStore.subscribe((s, prev) => {
+      const next = s.serverState?.minClientVersion ?? null;
+      const prevValue = prev?.serverState?.minClientVersion ?? null;
+      if (next === prevValue) return;
+      // Skip the first fetch (null → real value).
+      if (lastSeenMinVersion.current === null && prevValue === null) {
+        lastSeenMinVersion.current = next;
+        return;
+      }
+      lastSeenMinVersion.current = next;
+      // Server's required version changed mid-session — re-verify.
+      // Only meaningful once we're on `home` (post-auth, JWT exists).
+      if (s.state === 'home') {
+        useGameStore.getState().verifyOrInstallActive();
+      }
+    });
+  }, []);
 
   // Socket.io launcher-status connection + REST polling fallback.
   // Connect when the user reaches `home` (signed-in, has JWT);
