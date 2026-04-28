@@ -4,6 +4,9 @@
 // Every function is synchronous execSync and throws on non-zero exit.
 
 import { execSync } from "node:child_process";
+import { writeFileSync, unlinkSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function run(cmd, opts = {}) {
   return execSync(cmd, { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], ...opts }).trim();
@@ -125,12 +128,22 @@ export function stageFiles(paths) {
 
 /**
  * Creates a commit with a subject and optional multi-line body.
- * Body lines are passed via -m so they become separate paragraphs.
+ *
+ * Writes the message to a temp file and uses `git commit -F <file>`
+ * rather than `-m "<inline>"`. The inline form hits Windows' ~8191
+ * char command-line cap when embedding a release's full changelog
+ * body.
  */
 export function commit(subject, body = "") {
-  const args = ["git", "commit", "-m", shellQuote(subject)];
-  if (body) args.push("-m", shellQuote(body));
-  run(args.join(" "));
+  const message = body ? `${subject}\n\n${body}` : subject;
+  const dir = mkdtempSync(join(tmpdir(), "remnant-launcher-release-"));
+  const file = join(dir, "COMMIT_MSG");
+  writeFileSync(file, message, "utf8");
+  try {
+    run(`git commit -F "${file}"`);
+  } finally {
+    try { unlinkSync(file); } catch {}
+  }
 }
 
 /** Creates a lightweight tag at HEAD. */
