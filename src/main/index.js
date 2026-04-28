@@ -81,6 +81,13 @@ function createMainWindow() {
     maximizable: false,
     autoHideMenuBar: true,
     backgroundColor: '#0a070e',
+    // Defer first paint until the renderer is ready. Without this, the
+    // OS chrome paints immediately while the React tree is still loading,
+    // producing the "half-rendered top" flash where the title bar sits
+    // above an empty black body. ready-to-show fires after the renderer's
+    // first DOM paint, so the user sees a fully composed window or
+    // nothing at all.
+    show: false,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -90,6 +97,10 @@ function createMainWindow() {
   });
 
   mainWindow.setMenu(null);
+
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.show();
+  });
 
   // Close-X behavior is configurable via Settings. Default is 'tray'
   // (close minimizes to tray, like Battle.net / Riot). Players who

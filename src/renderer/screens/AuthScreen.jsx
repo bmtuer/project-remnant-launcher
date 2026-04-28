@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAppStore, useIsLauncherStale } from '../store/appStore.js';
 import { useRealmStore } from '../store/realmStore.js';
 import { SITE_URLS } from '../constants.js';
+import launcherHeroUrl from '../assets/launcher-hero.webp';
 
 export default function AuthScreen() {
   const signIn       = useAppStore((s) => s.signIn);
@@ -37,7 +38,10 @@ export default function AuthScreen() {
   const onRestart = () => window.launcher?.updater?.quitAndInstall();
 
   return (
-    <div className="auth-screen">
+    <div
+      className="auth-screen"
+      style={{ '--auth-bg-image': `url(${launcherHeroUrl})` }}
+    >
       <div className="auth-stack">
         <div className="auth-brand">PROJECT REMNANT</div>
 
@@ -93,7 +97,7 @@ function SignInCard({ email, setEmail, password, setPassword, onSubmit, busy, er
         />
       </label>
 
-      {error && <div className="auth-error" role="alert">{error}</div>}
+      {error && <div className="form-error" role="alert">{error}</div>}
 
       <button type="submit" className="btn btn-primary auth-submit" disabled={busy}>
         {busy ? 'Signing in…' : 'Sign In'}

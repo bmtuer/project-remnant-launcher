@@ -84,6 +84,7 @@ export default function HomeScreen() {
             realms={realms}
             value={selectedRealmId}
             onChange={selectRealm}
+            activeRealm={activeRealm}
           />
         </div>
 
@@ -118,10 +119,10 @@ export default function HomeScreen() {
                 </div>
                 <div className="announcements-feed">
                   {contentLoading && announcements.length === 0 && (
-                    <article className="announcement plate kind-notice">
-                      <p className="announcement-body">
-                        <span style={{ color: 'var(--text-muted)' }}>Loading announcements…</span>
-                      </p>
+                    <article className="announcement plate kind-notice" aria-busy="true">
+                      <span className="skeleton-line is-short" />
+                      <span className="skeleton-line is-medium" />
+                      <span className="skeleton-line" />
                     </article>
                   )}
                   {announcements.map((a) => (
@@ -154,20 +155,34 @@ export default function HomeScreen() {
               </div>
               <div className="patch-rail-grid">
                 {patchNotes.length === 0 && contentLoading && (
-                  <div style={{ gridColumn: '1 / -1', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
-                    Loading patch notes…
-                  </div>
+                  <>
+                    <div className="patch-card patch-card-skeleton" aria-busy="true">
+                      <span className="skeleton-line is-short" />
+                      <span className="skeleton-line is-medium" />
+                    </div>
+                    <div className="patch-card patch-card-skeleton" aria-busy="true">
+                      <span className="skeleton-line is-short" />
+                      <span className="skeleton-line is-medium" />
+                    </div>
+                    <div className="patch-card patch-card-skeleton" aria-busy="true">
+                      <span className="skeleton-line is-short" />
+                      <span className="skeleton-line is-medium" />
+                    </div>
+                  </>
                 )}
                 {patchNotes.length === 0 && !contentLoading && !contentError && (
-                  <div style={{ gridColumn: '1 / -1', color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
-                    No patch notes published yet.
+                  <div className="patch-rail-empty">
+                    <div className="empty-state">
+                      <div className="empty-state-eyebrow">No patch notes</div>
+                      <p className="empty-state-body">Nothing published yet — check back after the next release.</p>
+                    </div>
                   </div>
                 )}
                 {patchNotes.map((note) => (
                   <button
                     key={note.id}
                     type="button"
-                    className="patch-card kind-deploy"
+                    className="patch-card"
                     onClick={() => setOpenPatchNote(note)}
                   >
                     <div className="patch-card-version">v{note.version}</div>
@@ -176,7 +191,7 @@ export default function HomeScreen() {
                 ))}
               </div>
               {contentError && (
-                <div style={{ color: 'var(--accent-danger)', fontSize: 'var(--text-xs)', marginTop: 'var(--space-2)' }}>
+                <div className="form-error form-error-sm" role="alert">
                   Failed to load content: {contentError}
                 </div>
               )}
@@ -234,33 +249,49 @@ export default function HomeScreen() {
 
 // ─── Helpers ──────────────────────────────────────────────────────
 
-/** Realm <select> — wraps the existing .home-realm-chip styling but
- *  uses a native select so dropdown chrome is OS-correct. The single-
- *  realm v1 case still renders the dropdown (player can see the
- *  available realm); when Live Realm lands at Phase 3 it just shows
- *  in the options without code change. */
-function RealmSelect({ realms, value, onChange }) {
+/** Realm <select> — uses a native select so dropdown chrome is OS-
+ *  correct. Wrapped with a positioned status dot that sits inside the
+ *  chip's left padding (Battle.net pattern). Status colors come from
+ *  the same status-dot-* classes as AuthScreen's server strip. */
+function RealmSelect({ realms, value, onChange, activeRealm }) {
   if (realms.length === 0) {
-    // Pre-fetch / fetch-failed: render a non-interactive placeholder
+    // Pre-fetch / fetch-failed: render a skeleton-shaped placeholder
     // so the layout doesn't shift when realms load.
     return (
-      <button type="button" className="home-realm-chip" disabled>
-        <span className="home-realm-name">…</span>
-      </button>
+      <div className="home-realm-chip-wrap">
+        <button type="button" className="home-realm-chip" disabled aria-busy="true">
+          <span style={{ display: 'inline-block', width: '5rem' }}>
+            <span className="skeleton-line" style={{ height: '0.7rem' }} />
+          </span>
+        </button>
+      </div>
     );
   }
+  const status = activeRealm?.status ?? 'unknown';
+  const dotClass = {
+    online:      'status-dot-online',
+    maintenance: 'status-dot-maintenance',
+    offline:     'status-dot-offline',
+  }[status] ?? 'status-dot-offline';
   return (
-    <select
-      className="home-realm-chip home-realm-select"
-      value={value ?? ''}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {realms.map((r) => (
-        <option key={r.id} value={r.id}>
-          {r.name}
-        </option>
-      ))}
-    </select>
+    <div className="home-realm-chip-wrap">
+      <span
+        className={`status-dot home-realm-dot ${dotClass}`}
+        role="img"
+        aria-label={`Status: ${status}`}
+      />
+      <select
+        className="home-realm-chip home-realm-select has-status"
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {realms.map((r) => (
+          <option key={r.id} value={r.id}>
+            {r.name}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 

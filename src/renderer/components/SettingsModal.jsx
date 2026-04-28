@@ -117,7 +117,12 @@ export default function SettingsModal() {
 
         <div className="modal-body settings-body">
           {!settings ? (
-            <p className="placeholder-body">Loading…</p>
+            <div aria-busy="true">
+              <span className="skeleton-line is-medium" />
+              <span className="skeleton-line is-short" />
+              <span className="skeleton-line" />
+              <span className="skeleton-line is-medium" />
+            </div>
           ) : (
             <>
               {/* Auto-launch on Windows startup */}
@@ -182,7 +187,7 @@ export default function SettingsModal() {
               <RepairRow />
 
               {error && (
-                <div className="settings-error" role="alert">{error}</div>
+                <div className="form-error form-error-sm" role="alert">{error}</div>
               )}
             </>
           )}

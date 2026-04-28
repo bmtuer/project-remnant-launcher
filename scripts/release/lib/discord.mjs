@@ -12,7 +12,10 @@
 // Channels (mirror project-remnant's channel map):
 //   #deploys           — rich card on every release
 //   #changelog-staging — internal patch notes
-//   #staging-releases  — public-facing release announcement on publish
+//
+// Launcher releases intentionally do NOT post to #staging-releases
+// (that channel is reserved for game-client patch notes — players
+// auto-update launchers via electron-updater silently).
 //
 // Never throws on network failure — logs a warning and continues so
 // a transient Discord outage can't block a release after code is
@@ -65,20 +68,23 @@ export async function postLauncherDeployCard(
   { version, commitCount, releaseUrl, published },
 ) {
   const stateLabel = published ? "published" : "draft";
-  const footerText = published
-    ? "Live to players — auto-updating via electron-updater."
-    : "Draft on GitHub. Publish manually to push notes to #staging-releases.";
 
   const embed = {
     color: LAUNCHER_TEAL,
-    title: "🚀 Launcher Release — staging",
+    title: "🚀 Launcher Release",
     description: `**v${version}** — ${commitCount} commit${commitCount === 1 ? "" : "s"} since last release.`,
     fields: [
       { name: "Release", value: `[v${version} (${stateLabel})](${releaseUrl})` },
     ],
-    footer: { text: footerText },
     timestamp: new Date().toISOString(),
   };
+  // Draft state still benefits from a one-line nudge; published state
+  // lets the embed timestamp + state label carry the meaning.
+  if (!published) {
+    embed.footer = {
+      text: "Draft on GitHub. Publish manually via gh release edit --draft=false.",
+    };
+  }
   return postEmbed(webhookUrl, embed);
 }
 

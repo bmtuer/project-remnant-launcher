@@ -135,8 +135,8 @@ input:disabled { opacity: 0.55; }
   color: var(--bg-base);
 }
 .btn-primary:hover {
-  background: #b88a30;
-  border-color: #b88a30;
+  background: var(--brand-gold-pressed);
+  border-color: var(--brand-gold-pressed);
   box-shadow: 0 0 0 3px var(--focus-ring-glow);
 }
 .btn-primary:active     { transform: translateY(1px); }
@@ -169,6 +169,71 @@ input:disabled { opacity: 0.55; }
 
 @media (prefers-reduced-motion: reduce) {
   .btn:active { transform: none; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SHARED PRIMITIVES — form-error / skeleton / empty-state
+
+   Three small recipes used across auth, home, settings, patch-notes.
+   Consolidated here so the token discipline lives in one place: error
+   color is always color-mix off --accent-danger, skeleton shimmers off
+   --bg-raised, empty-state uses the section-eyebrow + muted-body pair.
+═══════════════════════════════════════════════════════════════ */
+
+.form-error {
+  font-size: var(--text-sm);
+  color: var(--accent-danger);
+  background: color-mix(in srgb, var(--accent-danger) 10%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-danger) 36%, transparent);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+}
+.form-error-sm { font-size: var(--text-xs); }
+
+.skeleton-line {
+  display: block;
+  height: 0.85rem;
+  background: linear-gradient(
+    90deg,
+    var(--bg-raised) 0%,
+    color-mix(in srgb, var(--bg-raised) 65%, var(--text-muted)) 50%,
+    var(--bg-raised) 100%
+  );
+  background-size: 200% 100%;
+  border-radius: var(--radius-sm);
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+.skeleton-line + .skeleton-line { margin-top: var(--space-2); }
+.skeleton-line.is-short { width: 40%; }
+.skeleton-line.is-medium { width: 70%; }
+@keyframes skeleton-shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-line { animation: none; opacity: 0.6; }
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-5) 0;
+  text-align: center;
+}
+.empty-state-eyebrow {
+  font-family: var(--font-display);
+  font-size: var(--text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.empty-state-body {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -212,7 +277,44 @@ input:disabled { opacity: 0.55; }
   justify-content: center;
   padding: var(--space-8);
   position: relative;
+  overflow: hidden;
 }
+/* Full-bleed atmospheric painting behind the auth card. Same asset
+   as the home hero; here it's blurred + heavily darkened so it reads
+   as ambience, not subject — the card sits crisp on top. The image
+   URL is set inline on the screen (Vite fingerprints the import); this
+   rule owns the sizing/positioning and the vignette overlay.
+
+   Layered effects:
+     ::before — the painting itself, scaled, blurred, desaturated.
+     ::after  — radial vignette + bottom darken so the card has a
+                "darkened pool" to sit on. Tints feathered with the
+                painting's actual cool/warm palette via tokens. */
+.auth-screen::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: var(--auth-bg-image, none);
+  background-size: cover;
+  background-position: center;
+  filter: blur(6px) saturate(0.85);
+  transform: scale(1.08);
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 0;
+}
+.auth-screen::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 50% at 50% 55%, transparent 0%, var(--bg-base) 100%),
+    radial-gradient(80% 60% at 20% 10%, var(--hero-tint-cool), transparent 70%),
+    radial-gradient(80% 60% at 80% 100%, var(--hero-tint-warm), transparent 70%);
+  z-index: 0;
+}
+.auth-screen > * { position: relative; z-index: 1; }
 
 .auth-stack {
   display: flex;
@@ -247,15 +349,6 @@ input:disabled { opacity: 0.55; }
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-secondary);
-}
-
-.auth-error {
-  font-size: var(--text-sm);
-  color: var(--accent-danger);
-  background: rgba(200, 64, 64, 0.08);
-  border: 1px solid rgba(200, 64, 64, 0.35);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
 }
 
 .auth-submit { margin-top: var(--space-2); width: 100%; }
@@ -301,7 +394,9 @@ input:disabled { opacity: 0.55; }
   flex-direction: column;
   gap: var(--space-5);
   border: 1px solid var(--accent-warning);
-  box-shadow: 0 0 0 1px rgba(192, 138, 58, 0.18) inset, var(--shadow-md);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent-warning) 22%, transparent) inset,
+    var(--shadow-md);
 }
 .auth-stale-eyebrow {
   font-family: var(--font-display);
@@ -388,6 +483,30 @@ input:disabled { opacity: 0.55; }
   align-items: center;
   gap: var(--space-3);
 }
+/* Realm picker — chip with an inline status dot. Dot sits INSIDE the
+   chip's left padding via overlapping positioning (Battle.net pattern).
+   Color carries the signal; aria-label on the dot carries the word for
+   screen readers. */
+.home-realm-chip-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.home-realm-chip-wrap .home-realm-dot {
+  position: absolute;
+  left: var(--space-3);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  pointer-events: none;
+}
+.home-realm-chip.has-status,
+.home-realm-select.has-status {
+  padding-left: calc(var(--space-3) + 0.5rem + var(--space-2));
+}
+
 .home-realm-label {
   font-family: var(--font-display);
   font-size: var(--text-2xs);
@@ -466,7 +585,7 @@ input:disabled { opacity: 0.55; }
   /* Slightly brighter on hover. The launcher's --brand-gold is a
      muted gold; brightening it here gives a tactile cue without
      introducing a new color. */
-  color: #e6c068;
+  color: var(--brand-gold-bright);
 }
 .header-icon-btn:focus-visible {
   outline: 2px solid var(--focus-ring);
@@ -667,6 +786,27 @@ input:disabled { opacity: 0.55; }
    (Fraunces, brand-gold); date is the secondary line (Inter
    tabular, text-muted). No more derived "headline" — the player
    clicks the card to read what changed. */
+/* Skeleton + empty variants for the patch-rail. Skeletons inherit
+   plate chrome but disable interactivity. Empty state spans all 3
+   grid columns so the eyebrow + body sit centered under the section. */
+.patch-card-skeleton {
+  cursor: default;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding-top: var(--space-5);
+}
+.patch-card-skeleton:hover {
+  border-color: var(--border-base);
+  border-left-color: var(--accent-info);
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-sm);
+}
+.patch-rail-empty {
+  grid-column: 1 / -1;
+}
+
 .patch-card-version {
   font-family: var(--font-display);
   font-size: var(--text-md);
@@ -699,14 +839,32 @@ input:disabled { opacity: 0.55; }
 
    Fallback: if the asset ever fails to load, the bg-recessed base
    color keeps the column from rendering as bare white. */
+/* The hero is treated as atmosphere, not a card. No border, no outer
+   shadow, no rounded card-edge — instead, edge-feathered via mask-image
+   so the painting eases into the surrounding chrome. The ::after layer
+   tints the painting with palette-matched warmth/coolness (tokens map
+   to the active asset's palette: teal sky + rust foliage today). The
+   bottom darken bleeds into the footer's --bg-recessed band so the seam
+   between hero + footer reads as one continuous atmospheric drop. */
 .home-hero {
   position: relative;
-  background-color: var(--bg-recessed);
+  background-color: var(--bg-base);
   background-size: cover;
   background-position: center;
-  border-radius: var(--radius-md);
-  box-shadow: inset 0 0 0 1px var(--border-base), var(--shadow-md);
-  overflow: hidden;       /* contain the ::after's rounded corners */
+  overflow: hidden;
+  /* Soft-feather all four edges so the painting dissolves into the
+     surrounding chrome rather than terminating against a hard rectangle.
+     Strongest fade on the left edge (toward announcements column) and
+     bottom edge (toward footer); top + right are subtler since they
+     meet the home-main padding directly. */
+  -webkit-mask-image:
+    linear-gradient(90deg,  transparent 0%, #000 12%, #000 100%),
+    linear-gradient(180deg, #000 0%, #000 78%, transparent 100%);
+  -webkit-mask-composite: source-in;
+          mask-image:
+    linear-gradient(90deg,  transparent 0%, #000 12%, #000 100%),
+    linear-gradient(180deg, #000 0%, #000 78%, transparent 100%);
+          mask-composite: intersect;
 }
 .home-hero::after {
   content: '';
@@ -714,9 +872,9 @@ input:disabled { opacity: 0.55; }
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(80% 50% at 30% 10%,  rgba(213, 165, 69, 0.10), transparent 70%),
-    radial-gradient(90% 60% at 80% 100%, rgba(168, 85, 247, 0.10), transparent 65%),
-    linear-gradient(180deg, transparent 60%, rgba(10, 7, 14, 0.40) 100%);
+    radial-gradient(80% 50% at 30% 10%,  var(--hero-tint-cool), transparent 70%),
+    radial-gradient(90% 60% at 80% 100%, var(--hero-tint-warm), transparent 65%),
+    linear-gradient(180deg, transparent 55%, var(--hero-bottom-darken) 100%);
 }
 
 /* Single-column collapse: at narrow widths drop the hero so the
@@ -997,14 +1155,6 @@ input:disabled { opacity: 0.55; }
 .settings-row-control {
   flex-shrink: 0;
 }
-.settings-error {
-  font-size: var(--text-xs);
-  color: var(--accent-danger);
-  background: rgba(200, 64, 64, 0.08);
-  border: 1px solid rgba(200, 64, 64, 0.35);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-}
 
 /* Toggle switch — track + thumb. Off state: muted track, thumb left.
    On state: brand-gold track, thumb right. Smooth transition on the
@@ -1161,7 +1311,7 @@ input:disabled { opacity: 0.55; }
      override per category. */
   color: var(--text-secondary);
 }
-.patch-tag-heading.tag-new  { color: var(--text-secondary); }
+.patch-tag-heading.tag-new  { color: var(--accent-success); }
 .patch-tag-heading.tag-upd  { color: var(--accent-info); }
 .patch-tag-heading.tag-fix  { color: var(--accent-danger); }
 .patch-tag-heading.tag-soon { color: var(--accent-warning); }
@@ -1259,6 +1409,6 @@ input:disabled { opacity: 0.55; }
   transition: background 0.2s ease, box-shadow 0.2s ease;
 }
 .update-banner-action:hover {
-  background: #b88a30;
+  background: var(--brand-gold-pressed);
   box-shadow: 0 0 0 3px var(--focus-ring-glow);
 }

@@ -15,8 +15,16 @@
   --bg-base:     #0a070e;
   --bg-surface:  #1d1620;
   --bg-raised:   #2c2330;
-  --bg-recessed: #0e0a12;
+  --bg-recessed: #0c0a10;     /* harmonized with game (was #0e0a12) */
   --bg-overlay:  rgba(10, 7, 14, 0.78);
+
+  /* ── Hero painting tints — keyed to launcher-hero.webp's palette
+     (teal-cyan sky, rust-red foliage). Swap these when the asset
+     changes so the chrome retunes in one place rather than across
+     every overlay rule. */
+  --hero-tint-cool: rgba(96, 168, 168, 0.10);
+  --hero-tint-warm: rgba(180, 76, 56, 0.10);
+  --hero-bottom-darken: rgba(10, 7, 14, 0.45);
 
   /* ── Text ────────────────────────────────────────────────── */
   --text-primary:   #ece6d8;
@@ -25,8 +33,10 @@
   --text-disabled:  #5a5660;
 
   /* ── Brand & currency (gold split) ───────────────────────── */
-  --brand-gold:    #d5a545;
-  --currency-gold: #d5a545;
+  --brand-gold:        #d5a545;
+  --brand-gold-pressed:#b88a30;   /* hover/active darken on gold CTAs */
+  --brand-gold-bright: #e6c068;   /* lift on gold ghost-icon hovers */
+  --currency-gold:     #d5a545;
 
   /* ── Rarity ladder (parity; launcher doesn't surface items today) */
   --rarity-common: #6a6a78;

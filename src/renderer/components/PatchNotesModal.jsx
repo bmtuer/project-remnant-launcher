@@ -77,7 +77,10 @@ export default function PatchNotesModal({ note, onClose }) {
 
         <div className="modal-body patch-modal-body">
           {grouped.length === 0 && (
-            <p className="placeholder-body">No entries.</p>
+            <div className="empty-state">
+              <div className="empty-state-eyebrow">No entries</div>
+              <p className="empty-state-body">This release has no published notes.</p>
+            </div>
           )}
           {grouped.map(({ tag, items }) => (
             <section key={tag} className="patch-tag-group">
