@@ -183,24 +183,26 @@ function ServerStatusStrip() {
     return null; // Loaded clean but empty — odd, but show nothing rather than a stale string
   }
 
-  // v1: show the first realm's status. Future multi-realm UX can
-  // iterate or summarize.
+  // v1: show the first realm's name + colored status dot. The dot
+  // carries the status meaning on its own — green = online, amber =
+  // maintenance, red = offline. No redundant text label.
+  // Status word still appears as an aria-label on the dot for screen
+  // readers (visual users get the color; non-visual users get the word).
   const realm = realms[0];
   const dotClass = {
     online:      'status-dot-online',
     maintenance: 'status-dot-maintenance',
     offline:     'status-dot-offline',
   }[realm.status] ?? 'status-dot-offline';
-  const statusLabel = {
-    online:      'online',
-    maintenance: 'maintenance',
-    offline:     'offline',
-  }[realm.status] ?? realm.status;
 
   return (
     <div className="auth-server-strip">
-      <span className={`status-dot ${dotClass}`} aria-hidden="true" />
-      {realm.name} — {statusLabel}
+      <span
+        className={`status-dot ${dotClass}`}
+        role="img"
+        aria-label={`Status: ${realm.status}`}
+      />
+      {realm.name}
     </div>
   );
 }
