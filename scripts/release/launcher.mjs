@@ -190,7 +190,10 @@ async function main() {
     console.log(`\nBuilding launcher + uploading to GitHub releases...`);
     console.log(`  This will take 1-2 minutes. Output below:\n`);
     try {
-      await runSubprocess("pnpm", ["exec", "electron-vite", "build"]);
+      // --mode staging loads .env.staging instead of .env so the packaged
+      // .exe points at the Railway staging server, not localhost:3001.
+      // Same pattern the game's pnpm release:staging uses.
+      await runSubprocess("pnpm", ["exec", "electron-vite", "build", "--mode", "staging"]);
       await runSubprocess("pnpm", ["exec", "electron-builder", "--win", "--publish", "always"]);
     } catch (err) {
       console.error(`\n✗ Build/publish failed: ${err.message}`);
