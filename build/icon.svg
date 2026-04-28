@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#2a2433"/>
+      <stop offset="60%" stop-color="#15121b"/>
+      <stop offset="100%" stop-color="#08070a"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e8c074"/>
+      <stop offset="50%" stop-color="#c9a25b"/>
+      <stop offset="100%" stop-color="#7a5f30"/>
+    </linearGradient>
+    <linearGradient id="goldRim" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#f0d488"/>
+      <stop offset="100%" stop-color="#5a4520"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background plate (warm-purple lineage matching launcher chrome) -->
+  <rect x="0" y="0" width="256" height="256" rx="40" fill="url(#bg)"/>
+
+  <!-- Outer brass rim -->
+  <rect x="6" y="6" width="244" height="244" rx="36" fill="none"
+        stroke="url(#goldRim)" stroke-width="2.5" opacity="0.55"/>
+
+  <!-- Painted "R" — chiseled serif, gold gradient -->
+  <text x="128" y="186" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif"
+        font-size="200" font-weight="700"
+        fill="url(#gold)"
+        stroke="#3a2d18" stroke-width="2"
+        paint-order="stroke fill">R</text>
+
+  <!-- Subtle inner highlight stroke on the R for chiseled depth -->
+  <text x="128" y="186" text-anchor="middle"
+        font-family="Georgia, 'Times New Roman', serif"
+        font-size="200" font-weight="700"
+        fill="none"
+        stroke="#f5dca0" stroke-width="0.6" opacity="0.4">R</text>
+</svg>
