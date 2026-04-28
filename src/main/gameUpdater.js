@@ -35,7 +35,7 @@ import { promises as fs, createWriteStream } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 
 const GAME_INSTALL_ROOT = join(app.getPath('appData'), 'RemnantLauncher', 'game');
 const GAME_STATE_FILE   = join(app.getPath('appData'), 'RemnantLauncher', 'game-state.json');
@@ -182,18 +182,27 @@ async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProg
   const out = createWriteStream(tempPath);
   let lastProgressEmit = 0;
 
-  const tap = new ReadableTap(res.body, (chunk) => {
-    hash.update(chunk);
-    downloaded += chunk.length;
-    const now = Date.now();
-    if (now - lastProgressEmit >= 100) {
-      lastProgressEmit = now;
-      const percent = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
-      onProgress?.({ percent, downloaded, total });
-    }
+  // Convert fetch's Web ReadableStream → Node Readable using the
+  // built-in helper. Then layer a passthrough Transform that taps
+  // each chunk for sha512 hashing + progress reporting. Lets Node's
+  // pipeline handle backpressure + cancellation correctly without
+  // the custom ReadableTap class fighting it.
+  const source = Readable.fromWeb(res.body);
+  const tap = new Transform({
+    transform(chunk, _enc, cb) {
+      hash.update(chunk);
+      downloaded += chunk.length;
+      const now = Date.now();
+      if (now - lastProgressEmit >= 100) {
+        lastProgressEmit = now;
+        const percent = total > 0 ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
+        onProgress?.({ percent, downloaded, total });
+      }
+      cb(null, chunk);
+    },
   });
 
-  await pipeline(tap, out);
+  await pipeline(source, tap, out);
 
   // Final progress emit at 100%.
   onProgress?.({ percent: 100, downloaded, total });
@@ -218,38 +227,6 @@ async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProg
     installedAt: new Date().toISOString(),
   };
   await writeGameState(state);
-}
-
-/**
- * Tap a Web Stream / Node stream so we can observe each chunk
- * (for progress + sha512 hashing) without buffering the whole
- * payload. Wraps a fetch's response.body (a Web ReadableStream)
- * into a Node Readable that the pipeline can consume.
- */
-class ReadableTap extends Readable {
-  constructor(webStream, onChunk) {
-    super();
-    this._reader = webStream.getReader();
-    this._onChunk = onChunk;
-    this._reading = false;
-  }
-  async _read() {
-    if (this._reading) return;
-    this._reading = true;
-    try {
-      const { value, done } = await this._reader.read();
-      if (done) {
-        this.push(null);
-        return;
-      }
-      this._onChunk(value);
-      this.push(Buffer.from(value));
-    } catch (err) {
-      this.destroy(err);
-    } finally {
-      this._reading = false;
-    }
-  }
 }
 
 // ─── Public API ────────────────────────────────────────────────

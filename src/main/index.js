@@ -287,6 +287,10 @@ function registerIpc() {
       });
       return { ok: true, ...result };
     } catch (err) {
+      // Log the full error to the launcher's main-process console so
+      // it appears in the dev terminal — much easier to diagnose than
+      // chasing the message through three layers of IPC.
+      console.error('[game-update] verifyOrInstall failed:', err);
       mainWindow?.webContents.send('game-update:status', {
         phase: 'error',
         message: err?.message ?? 'Update failed',
@@ -309,6 +313,7 @@ function registerIpc() {
       });
       return { ok: true, ...result };
     } catch (err) {
+      console.error('[game-update] forceRepair failed:', err);
       mainWindow?.webContents.send('game-update:status', {
         phase: 'error',
         message: err?.message ?? 'Repair failed',
