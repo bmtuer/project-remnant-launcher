@@ -6,13 +6,13 @@ directories:
   output: release
   buildResources: build
 
-# Explicit `files:` block was previously `out/**/* + package.json` only,
-# which broke runtime: electron-updater requires `debug` which requires
-# `ms`, both of which live under pnpm's flat .pnpm/ layout. Without
-# node_modules in the files glob, electron-builder packs the asar without
-# them and the launcher dies on startup with "Cannot find module 'ms'".
-# The defaults electron-builder uses when no `files:` is specified do
-# resolve pnpm symlinks correctly — we just need to spell out the glob.
+# Explicit files glob — electron-updater requires `debug → ms` at
+# runtime, both lazily required from inside the package, so without
+# spelling out `node_modules/**/*` electron-builder's prune step skips
+# them and the launcher dies with "Cannot find module 'ms'". Defaults
+# do not resolve this case correctly. Note: `extract-zip` is bundled
+# into the main process directly (see electron.vite.config.mjs) so its
+# transitives don't need to be packed in node_modules.
 files:
   - out/**/*
   - package.json
