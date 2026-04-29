@@ -232,22 +232,22 @@ export const useAppStore = create((set, get) => ({
   },
 
   // ─── Game lifecycle ──────────────────────────────────────────
-  // PR 5 wires the version-gate sequence (check realm latest_version,
-  // run differential update, then spawn). PR 2 lands the spawn path
-  // itself; the version gate currently no-ops.
+  // Bundle handed to the game via the launcher's named-pipe IPC
+  // server (see main/ipcServer.js#stageBundle). The renderer doesn't
+  // touch the pipe — it just hands the bundle to main, which stages
+  // it under a one-shot nonce and passes the pipe path + nonce to
+  // the spawned game via env.
   //
-  // Bundle handed to game via stdin includes:
+  // Bundle fields:
   //   - jwt + refreshToken: current Supabase session
   //   - accountId + email: identity convenience
   //   - env + realmId: tells the game which game DB to point at
-  //   - launcherPipePath: PID-scoped pipe for runtime IPC (token refresh)
   launchGame: async () => {
     const session = get().session;
     if (!session) {
       set({ signInError: 'Sign in before launching the game.' });
       return;
     }
-    const launcherPipePath = await window.launcher.ipc.getPipePath();
     const bundle = {
       jwt:               session.access_token,
       refreshToken:      session.refresh_token,
@@ -255,7 +255,6 @@ export const useAppStore = create((set, get) => ({
       email:             session.user?.email ?? null,
       env:               'test',          // PR 5 plumbs the active realm
       realmId:           'test',
-      launcherPipePath,
     };
     set({ state: 'playing' });
     const result = await window.launcher.game.spawn(bundle);

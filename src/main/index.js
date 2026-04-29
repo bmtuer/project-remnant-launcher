@@ -1,5 +1,16 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell } from 'electron';
 import { join } from 'path';
+
+// Resolve the launcher icon for runtime use (window + tray).
+// In dev, electron-vite runs from `out/main/`, so `build/icon.ico`
+// lives at `../../build/icon.ico` relative to __dirname.
+// In prod (packaged), package.json's build.extraResources copies the
+// icon to `resources/icon.ico`, accessible via `process.resourcesPath`.
+// The Windows binary icon (taskbar when pinned, Start Menu, Explorer)
+// is set separately by electron-builder via `build.win.icon`.
+const APP_ICON_PATH = app.isPackaged
+  ? join(process.resourcesPath, 'icon.ico')
+  : join(__dirname, '..', '..', 'build', 'icon.ico');
 import { readTokens, writeTokens, clearTokens } from './tokenStore.js';
 import {
   spawnGame,
@@ -8,7 +19,13 @@ import {
   hideLauncherWindows,
   showLauncherWindows,
 } from './gameSpawner.js';
-import { startIpcServer, stopIpcServer, getPipePath } from './ipcServer.js';
+import {
+  startIpcServer,
+  stopIpcServer,
+  getPipePath,
+  stageBundle,
+  dropStagedBundle,
+} from './ipcServer.js';
 import { startLauncherUpdater, quitAndInstallLauncher } from './launcherUpdater.js';
 import { readSettings, writeSettings, peekSettings, syncAutoLaunch } from './settingsStore.js';
 import { verifyOrInstall, forceRepair, getInstalledVersion } from './gameUpdater.js';
@@ -73,6 +90,7 @@ function createMainWindow() {
   mainWindow = new BrowserWindow({
     width,
     height,
+    icon: APP_ICON_PATH,
     // Non-resizable: dropdown is the only path to a different size.
     // Avoids the "I dragged it bigger but the dropdown still says
     // Compact" confusion. Player picks a preset, launcher snaps to it.
@@ -137,9 +155,14 @@ function showMainWindow() {
 }
 
 function createTray() {
-  // Placeholder icon — final art deferred. nativeImage.createEmpty() yields
-  // a generic Windows tray slot; replace with `build/icons/tray.ico` at art-pass.
-  const icon = nativeImage.createEmpty();
+  // Tray uses the same .ico as the binary + window. Windows scales it
+  // to the 16/24/32 system tray slot automatically (the .ico is
+  // multi-resolution). Falls back to an empty image if the file is
+  // missing — defensive: launcher still runs even if asset is bad.
+  let icon = nativeImage.createFromPath(APP_ICON_PATH);
+  if (icon.isEmpty()) {
+    icon = nativeImage.createEmpty();
+  }
   tray = new Tray(icon);
   tray.setToolTip('Remnant Launcher');
 
@@ -235,16 +258,30 @@ function registerIpc() {
 
   // ─── Game-spawn IPC ───────────────────────────────────────────────
   // Renderer requests game launch with the current session bundle.
-  // Main hides the launcher window, spawns the game with stdin
-  // handoff, and dispatches on exit-code when the game exits.
+  // Main hides the launcher window, stages the bundle on the IPC
+  // pipe + spawns the game, and dispatches on exit-code when the
+  // game exits.
   ipcMain.handle('game:spawn', async (_e, bundle) => {
     if (isGameRunning()) {
       return { ok: false, error: 'already-running' };
     }
+    // Stage the bundle on the IPC server keyed by a one-shot nonce.
+    // Spawn the game with LAUNCHER_PIPE_PATH + LAUNCHER_HANDOFF_NONCE
+    // in its env. Game connects, calls `get-bundle` with the nonce,
+    // receives the bundle, and the stage is evicted. Stdin handoff
+    // was tried first — Windows GUI-subsystem Electron binaries don't
+    // reliably receive stdin from the parent, so we use the named pipe
+    // (which we needed anyway for runtime token refresh).
+    const nonce = stageBundle(bundle);
     return new Promise((resolve) => {
       const child = spawnGame(bundle, {
+        handoff: {
+          pipePath: getPipePath(),
+          nonce,
+        },
         onSpawnError: (err) => {
-          // Surface the spawn error back to the renderer (toast it).
+          // Drop the staged bundle — game never connected to consume it.
+          dropStagedBundle(nonce);
           mainWindow?.webContents.send('game:spawn-error', {
             code: err.code ?? 'UNKNOWN',
             message: err.message,
@@ -252,22 +289,17 @@ function registerIpc() {
           resolve({ ok: false, error: err.code ?? 'spawn-failed' });
         },
         onExit: (code) => {
-          // Game exited. Restore launcher window + dispatch on the
-          // exit code so the renderer can route to the right state
-          // (re-sign-in for code 3, version-update flow for code 2,
-          // etc.). PR 5 wires the version-update flow; PR 2 just
-          // dispatches the code and the renderer toasts it for now.
+          // Game exited. Drop the staged bundle if the game never
+          // consumed it (rare — would mean game died before connecting).
+          dropStagedBundle(nonce);
           showLauncherWindows();
           mainWindow?.webContents.send('game:exited', { code });
         },
       });
       if (child) {
-        // Spawn succeeded — hide launcher windows. Game is now running.
         hideLauncherWindows();
         resolve({ ok: true });
       }
-      // If child is null, spawnGame already called onSpawnError +
-      // resolve; nothing to do here.
     });
   });
 
@@ -437,9 +469,10 @@ app.whenReady().then(async () => {
   // Skipped in dev (no packaged binary to update against).
   startLauncherUpdater(mainWindow);
 
-  // IPC server for the spawned game's runtime requests (token refresh).
-  // Pipe path is PID-scoped — the spawned game inherits our PID
-  // through stdin's bundle and reconnects post-spawn.
+  // IPC server for boot handoff (one-shot bundle delivery via the
+  // built-in `get-bundle` handler in ipcServer.js) and the spawned
+  // game's runtime requests (token refresh). Pipe path is PID-scoped,
+  // passed to the game via LAUNCHER_PIPE_PATH env var on spawn.
   startIpcServer({
     'refresh-token': () => handleTokenRefresh(),
   });

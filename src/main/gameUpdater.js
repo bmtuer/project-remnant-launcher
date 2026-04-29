@@ -2,31 +2,48 @@
 //
 // Protocol:
 //   1. Fetch manifest from <game-api>/launcher/game-update-info?env={env}
-//      → server 302s to GitHub-signed latest.yml URL
-//      → we follow + parse YAML
-//   2. Manifest declares: version, file path (relative to manifest URL),
-//      sha512 of the .exe
+//      → server 302s to GitHub-signed manifest.json URL
+//      → we follow + parse JSON
+//   2. Manifest declares: version, archive filename, sha512 of the
+//      archive, size
 //   3. Compare manifest version to per-realm installed version (from
 //      userData/game-state.json)
 //   4. If outdated or missing: download via /launcher/game-binary?env=X&version=Y
-//      → server 302s to GitHub-signed .exe URL
-//      → we stream bytes to disk while computing sha512
-//   5. Verify sha512 matches manifest; on success, atomic-rename into
-//      place + update game-state.json
+//      → server 302s to GitHub-signed .zip URL
+//      → we stream bytes to disk while computing sha512 of the archive
+//   5. Verify sha512 matches manifest. On success, unzip to a staging
+//      subdir, atomically replace the active install with it, delete
+//      the .zip, update game-state.json.
+//
+// Why .zip + unzip rather than a portable .exe directly:
+//   electron-builder's portable target wraps the app in a self-
+//   extracting wrapper exe. That wrapper unpacks to a tmpdir on each
+//   launch and re-spawns the inner Electron — env/argv/stdin don't
+//   propagate cleanly across the indirection (we hit this with the
+//   original stdin handoff before pivoting to named-pipe IPC; even
+//   with env-var-only handoff the per-launch unpack overhead and
+//   tmpdir lifecycle are wrong shape for a 200 MB game). The .zip
+//   target produces a normal unpacked Electron app dir; the launcher
+//   unzips once into the install root and spawns RemnantGame.exe
+//   directly. See electron-builder issue #1410 for the wrapper's
+//   underlying limitations.
 //
 // Session cache:
 //   Once a verify succeeds for an (env, version) pair, remember it
 //   in-memory until launcher restart. Subsequent Play clicks on the
-//   same (env, version) skip the verify+update step. Mirrors the
-//   Battle.net pattern.
+//   same (env, version) skip the verify+update step.
 //
-// Per-realm install:
-//   %APPDATA%/RemnantLauncher/game/{env}/RemnantGame.exe
-//   gameSpawner.js already resolves binaries from this layout.
+// Per-realm install layout:
+//   %APPDATA%/RemnantLauncher/game/{env}/        ← active install
+//                                  RemnantGame.exe
+//                                  resources/
+//                                  ...
+//   %APPDATA%/RemnantLauncher/game/{env}.staging/ ← unzip target
+//   gameSpawner.js resolves the inner RemnantGame.exe from this layout.
 //
 // State file:
 //   %APPDATA%/RemnantLauncher/game-state.json
-//   { test: { version: '0.7.2', sha512: '...', installedAt: '...' } }
+//   { test: { version: '0.8.2', sha512: '...', installedAt: '...' } }
 //
 // Emits progress to the renderer via 'game-update:status' events.
 
@@ -36,6 +53,7 @@ import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
+import extract from 'extract-zip';
 
 const GAME_INSTALL_ROOT = join(app.getPath('appData'), 'RemnantLauncher', 'game');
 const GAME_STATE_FILE   = join(app.getPath('appData'), 'RemnantLauncher', 'game-state.json');
@@ -136,9 +154,13 @@ function parseManifest(json) {
 
 // ─── Verify ────────────────────────────────────────────────────
 //
-// Read the installed binary, compute sha512, compare to the manifest's
-// sha512. Both are base64-encoded (electron-builder's convention).
-// Returns true if matching, false if mismatch (or file missing).
+// The manifest sha512 is the hash of the .zip we downloaded, not of
+// the unpacked RemnantGame.exe — re-hashing the .exe wouldn't compare
+// against anything authoritative. So "verify installed" is just a
+// file-existence + state-file-version-match check. The download path
+// is what enforces integrity (verify .zip's sha512 against the
+// manifest before unzipping); after that, the install dir's contents
+// are trusted until the next download.
 async function verifyInstalledBinary({ env, manifest }) {
   const binaryPath = gameBinaryPath(env);
   try {
@@ -146,23 +168,34 @@ async function verifyInstalledBinary({ env, manifest }) {
   } catch {
     return false;  // No binary installed yet
   }
-  const buf = await fs.readFile(binaryPath);
-  const hash = createHash('sha512').update(buf).digest('base64');
-  return hash === manifest.sha512;
+  const state = await readGameState();
+  return state[env]?.version === manifest.version;
 }
 
 // ─── Download ──────────────────────────────────────────────────
 //
-// Stream the .exe from /launcher/game-binary into the per-realm
-// install dir. We compute sha512 in-flight so we don't have to read
-// the file again post-download. Atomic-rename pattern: write to a
-// .tmp file first, verify, then rename to RemnantGame.exe so a
-// crashed download never leaves a half-written binary in place.
+// Stream the .zip from /launcher/game-binary into a sibling temp
+// path next to the active install dir, compute sha512 in-flight,
+// verify against manifest. Then unzip into a staging dir, swap the
+// staging dir over the active dir atomically (rename-old-aside →
+// rename-staging-into-place → rm-old-aside), and clean up the .zip.
 //
-// Progress is emitted to the renderer every ~100ms as a percent +
-// downloaded bytes. The progress hook is a function the caller
-// provides; main wires it to a webContents.send('game-update:status').
-async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProgress }) {
+// Failure modes the order above guards against:
+//   - download crash mid-stream → .tmp file gets unlinked, no
+//     visible state change to the active install.
+//   - sha512 mismatch → .tmp deleted before unzip, no visible
+//     state change.
+//   - unzip crash → staging dir is rm-rf'd, .zip is deleted, active
+//     install untouched.
+//   - rename-old-aside succeeds but rename-staging-into-place fails
+//     → we restore the old install from the aside dir before
+//     surfacing the error. The window where the install dir is
+//     missing entirely is a few ms of two os.rename calls.
+//
+// Progress is emitted to the renderer every ~100ms during download.
+// Unzip is fast enough on a 130MB archive (~2s on typical disks)
+// that we just emit phase: 'installing' once when it starts.
+async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProgress, onPhase }) {
   const url = `${apiBase}/launcher/game-binary?env=${encodeURIComponent(env)}&version=${encodeURIComponent(version)}`;
   const res = await fetch(url, {
     headers: { Authorization: `Bearer ${jwt}` },
@@ -178,22 +211,24 @@ async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProg
   let downloaded = 0;
   const hash = createHash('sha512');
 
-  const targetDir = gameDirForEnv(env);
-  await fs.mkdir(targetDir, { recursive: true });
-  const finalPath = join(targetDir, 'RemnantGame.exe');
-  const tempPath  = `${finalPath}.tmp`;
+  const activeDir   = gameDirForEnv(env);
+  const stagingDir  = `${activeDir}.staging`;
+  const oldAsideDir = `${activeDir}.old`;
+  const archiveTemp = join(dirname(activeDir), `${manifest.path ?? 'game'}.tmp`);
 
-  // Drop any prior .tmp from a crashed previous download.
-  try { await fs.unlink(tempPath); } catch { /* ignore */ }
+  // Make sure parent dir exists for the archive temp.
+  await fs.mkdir(dirname(activeDir), { recursive: true });
 
-  const out = createWriteStream(tempPath);
+  // Drop any prior staging / aside / .tmp from a crashed previous
+  // attempt so we start clean.
+  await rmrf(stagingDir);
+  await rmrf(oldAsideDir);
+  try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+
+  // ── Stage 1: stream + hash + write to .tmp archive ──
+  const out = createWriteStream(archiveTemp);
   let lastProgressEmit = 0;
 
-  // Convert fetch's Web ReadableStream → Node Readable using the
-  // built-in helper. Then layer a passthrough Transform that taps
-  // each chunk for sha512 hashing + progress reporting. Lets Node's
-  // pipeline handle backpressure + cancellation correctly without
-  // the custom ReadableTap class fighting it.
   const source = Readable.fromWeb(res.body);
   const tap = new Transform({
     transform(chunk, _enc, cb) {
@@ -210,23 +245,70 @@ async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProg
   });
 
   await pipeline(source, tap, out);
-
-  // Final progress emit at 100%.
   onProgress?.({ percent: 100, downloaded, total });
 
-  // Verify sha512 before promoting .tmp → RemnantGame.exe.
+  // ── Stage 2: verify sha512 ──
   const computed = hash.digest('base64');
   if (computed !== manifest.sha512) {
-    try { await fs.unlink(tempPath); } catch { /* ignore */ }
-    throw new Error(`sha512 mismatch — download corrupted (got ${computed.slice(0, 16)}…, expected ${manifest.sha512.slice(0, 16)}…)`);
+    try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+    throw new Error(
+      `sha512 mismatch — download corrupted (got ${computed.slice(0, 16)}…, expected ${manifest.sha512.slice(0, 16)}…)`,
+    );
   }
 
-  // Atomic-ish rename. On Windows, rename across directories is not
-  // atomic, but within the same dir it is.
-  try { await fs.unlink(finalPath); } catch { /* ignore — first install */ }
-  await fs.rename(tempPath, finalPath);
+  // ── Stage 3: unzip into staging dir ──
+  onPhase?.('installing');
+  await fs.mkdir(stagingDir, { recursive: true });
+  try {
+    await extract(archiveTemp, { dir: stagingDir });
+  } catch (err) {
+    await rmrf(stagingDir);
+    try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+    throw new Error(`Unzip failed: ${err.message}`);
+  }
 
-  // Update state file.
+  // electron-builder's zip target wraps the unpacked app in an inner
+  // dir named after productName (e.g. "RemnantGame-win32-x64/").
+  // Resolve which subdir actually contains RemnantGame.exe so we can
+  // promote either layout (with-or-without inner dir) into the active
+  // install path.
+  const installRoot = await resolveInstallRoot(stagingDir);
+  if (!installRoot) {
+    await rmrf(stagingDir);
+    try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+    throw new Error('Unzipped archive did not contain RemnantGame.exe');
+  }
+
+  // ── Stage 4: atomic-ish swap ──
+  // Rename existing active install aside (if present), then rename
+  // installRoot into the active path. Restore on failure.
+  let hadExisting = false;
+  try {
+    await fs.access(activeDir);
+    hadExisting = true;
+  } catch { /* no prior install — fine */ }
+
+  if (hadExisting) {
+    await fs.rename(activeDir, oldAsideDir);
+  }
+  try {
+    await fs.rename(installRoot, activeDir);
+  } catch (err) {
+    // Restore the old install if we just removed it. Best-effort.
+    if (hadExisting) {
+      try { await fs.rename(oldAsideDir, activeDir); } catch { /* ignore */ }
+    }
+    await rmrf(stagingDir);
+    try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+    throw new Error(`Install rename failed: ${err.message}`);
+  }
+
+  // ── Stage 5: cleanup ──
+  await rmrf(stagingDir);
+  await rmrf(oldAsideDir);
+  try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+
+  // ── Stage 6: state ──
   const state = await readGameState();
   state[env] = {
     version: manifest.version,
@@ -234,6 +316,38 @@ async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProg
     installedAt: new Date().toISOString(),
   };
   await writeGameState(state);
+}
+
+// rm -rf with a try/catch wrapper. Returns void; failure is silent
+// because we use this in cleanup paths where a missing dir is normal.
+async function rmrf(dir) {
+  try {
+    await fs.rm(dir, { recursive: true, force: true });
+  } catch { /* ignore */ }
+}
+
+// Find the directory inside `stagingDir` that contains RemnantGame.exe.
+// electron-builder's zip target may put it directly at the root or
+// inside a single inner dir. Returns the path to the dir containing
+// RemnantGame.exe, or null if not found.
+async function resolveInstallRoot(stagingDir) {
+  // Direct hit?
+  try {
+    await fs.access(join(stagingDir, 'RemnantGame.exe'));
+    return stagingDir;
+  } catch { /* fall through */ }
+
+  // One level deep?
+  const entries = await fs.readdir(stagingDir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const candidate = join(stagingDir, entry.name);
+    try {
+      await fs.access(join(candidate, 'RemnantGame.exe'));
+      return candidate;
+    } catch { /* try next */ }
+  }
+  return null;
 }
 
 // ─── Public API ────────────────────────────────────────────────
@@ -313,13 +427,10 @@ async function runVerifyOrInstall({ apiBase, env, jwt, onStatus }) {
     onProgress: ({ percent, downloaded, total }) => {
       onStatus?.({ phase: 'downloading', version: manifest.version, percent, downloaded, total });
     },
+    onPhase: (phase) => {
+      onStatus?.({ phase, version: manifest.version });
+    },
   });
-
-  onStatus?.({ phase: 'installing', version: manifest.version });
-  // No further work — downloadGameBinary already atomically promoted
-  // the .tmp into place + updated the state file. "installing" phase
-  // exists for UI symmetry with the v2 differential-update path that
-  // would do block-map application here.
 
   verifyCache.add(`${env}@${manifest.version}`);
   onStatus?.({ phase: 'done', version: manifest.version });

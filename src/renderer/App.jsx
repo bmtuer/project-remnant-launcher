@@ -166,9 +166,15 @@ export default function App() {
     };
   }, [signOut]);
 
+  // 'playing' renders HomeScreen too — the launcher window is hidden
+  // while the game runs, but state may flip to 'playing' a frame
+  // before main hides the window. Falling through to AuthScreen there
+  // produces a visible flash of the sign-in screen on Play. Keeping
+  // HomeScreen in the 'playing' arm also means when the launcher
+  // restores on game exit, it's already in the right state mid-paint.
   let screen;
   if (state === 'boot') screen = <BootScreen />;
-  else if (state === 'home') screen = <HomeScreen />;
+  else if (state === 'home' || state === 'playing') screen = <HomeScreen />;
   else screen = <AuthScreen />;
 
   return (

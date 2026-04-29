@@ -1,14 +1,22 @@
-// Spawns the game binary as a child process with the JWT bundle handed
-// off via stdin. Per the launcher-split plan and `docs/systems/auth.md`:
-// stdin is invisible to other processes (env vars are visible via
-// `tasklist /v` and captured in crash dumps; child processes inherit
-// env). Industry MMOs avoid env vars for tokens for these reasons.
+// Spawns the game binary as a child process. The JWT bundle is staged
+// on the launcher's IPC named-pipe server keyed by a one-shot nonce;
+// we pass LAUNCHER_PIPE_PATH + LAUNCHER_HANDOFF_NONCE in the child env
+// and the game connects to the pipe at boot to retrieve it.
+//
+// We tried stdin handoff first (industry-typical for Unix tools).
+// Windows GUI-subsystem Electron binaries don't reliably receive stdin
+// from a parent process — the spawned game's stdin pipe stays empty
+// even when the parent writes synchronously after spawn. The named
+// pipe is the standard pattern for this on Windows (Battle.net,
+// FFXIV, Steam overlay all use named pipes for launcher↔game), and
+// we already had one running for runtime token refresh.
+//
+// Token bytes never appear in env. Only the pipe path + a 16-byte
+// random nonce. After the game's first successful `get-bundle` with
+// the matching nonce, the staged bundle is evicted — a racing
+// observer either loses the race or gets `no-bundle`.
 //
 // Game-binary location for v1: %APPDATA%/RemnantLauncher/game/{env}/.
-// PR 5 wires the actual install + update flow; this module just spawns
-// from that location. If the binary doesn't exist (PR 2 reality —
-// the launcher's wired but game distribution isn't), we fail
-// gracefully with a toast back to the renderer.
 //
 // Exit-code conventions (mirrored on the game side):
 //   0 - normal exit (player closed game from in-game)
@@ -41,57 +49,71 @@ export function isGameRunning() {
 }
 
 /**
- * Spawn the game with a JWT bundle. Returns a Promise that resolves to
- * the exit code when the child exits, or rejects if spawn itself fails.
+ * Spawn the game. The JWT bundle is staged on the launcher's IPC
+ * named-pipe server (see `ipcServer.js#stageBundle`); this module
+ * passes the pipe path + nonce in the child env so the game can
+ * connect and retrieve the bundle at boot.
  *
  * Caller is responsible for hiding/showing the launcher main window
  * around this call — this module only owns the child process.
  *
  * @param {object} bundle - { jwt, refreshToken, accountId, env, realmId }
- * @param {object} hooks  - { onExit?: (code) => void, onSpawnError?: (err) => void }
+ * @param {object} hooks  - { handoff: { pipePath, nonce }, onExit?, onSpawnError? }
  */
 export function spawnGame(bundle, hooks = {}) {
   if (isGameRunning()) {
     throw new Error('Game is already running.');
+  }
+  if (!hooks.handoff?.pipePath || !hooks.handoff?.nonce) {
+    throw new Error('spawnGame: handoff { pipePath, nonce } is required.');
   }
 
   const env = bundle.env ?? 'test';
   const binaryPath = resolveGameBinaryPath(env);
 
   if (!existsSync(binaryPath)) {
-    // PR 5 wires real game distribution. Until then this is the
-    // expected dev-side behavior — surface the missing-binary state
-    // back to the renderer and let it show a friendly message rather
-    // than crashing the launcher.
     const err = new Error(
-      `Game binary not found at ${binaryPath}. Game updater + installer wires in PR 5.`,
+      `Game binary not found at ${binaryPath}. Run verifyOrInstall first.`,
     );
     err.code = 'GAME_BINARY_MISSING';
     hooks.onSpawnError?.(err);
     return null;
   }
 
+  // Scrub Electron-internal env vars that would mis-configure the
+  // spawned game:
+  //
+  // - ELECTRON_RUN_AS_NODE: when set, Electron drops the Chromium
+  //   runtime and runs as plain Node. Crashes the game on boot.
+  //   Common enough on Windows dev boxes (some tooling sets it
+  //   globally) that defensive scrubbing is worth the line.
+  //
+  // - ELECTRON_RENDERER_URL: set by electron-vite in dev mode. Points
+  //   at the LAUNCHER's renderer dev server when the launcher runs
+  //   under `pnpm dev`. If we leave it in the child env, the game's
+  //   main process loads the launcher's renderer URL — game window
+  //   shows launcher UI. Strip it.
+  //
+  // - ELECTRON_DISABLE_SANDBOX, ELECTRON_NO_ATTACH_CONSOLE: same
+  //   class — internal flags that would cross-contaminate the child.
+  //
+  // Then inject the handoff env vars: pipe path + one-shot nonce.
+  // The bundle bytes themselves never touch env (visible to other
+  // processes) — only the pipe path + nonce, both single-use.
+  const childEnv = { ...process.env };
+  delete childEnv.ELECTRON_RUN_AS_NODE;
+  delete childEnv.ELECTRON_RENDERER_URL;
+  delete childEnv.ELECTRON_DISABLE_SANDBOX;
+  delete childEnv.ELECTRON_NO_ATTACH_CONSOLE;
+  childEnv.LAUNCHER_PIPE_PATH = hooks.handoff.pipePath;
+  childEnv.LAUNCHER_HANDOFF_NONCE = hooks.handoff.nonce;
+
   const child = spawn(binaryPath, [], {
-    stdio: ['pipe', 'inherit', 'inherit'],
+    stdio: 'ignore',
     detached: false,
     windowsHide: false,
+    env: childEnv,
   });
-
-  // Write the bundle as a single JSON line, then close stdin. The game
-  // reads exactly one line at boot and ignores anything afterward.
-  // Closing stdin signals EOF — the game knows the handoff is done.
-  try {
-    child.stdin.write(JSON.stringify(bundle) + '\n');
-    child.stdin.end();
-  } catch (writeErr) {
-    // If stdin write fails (extremely rare — pipe broken before we
-    // write), kill the child + surface the error.
-    try { child.kill(); } catch { /* ignore */ }
-    const err = new Error(`Failed to write JWT bundle to game stdin: ${writeErr.message}`);
-    err.code = 'STDIN_WRITE_FAILED';
-    hooks.onSpawnError?.(err);
-    return null;
-  }
 
   activeChild = child;
 

@@ -23,6 +23,9 @@ importers:
       electron-updater:
         specifier: ^6.8.3
         version: 6.8.3
+      extract-zip:
+        specifier: ^2.0.1
+        version: 2.0.1
       ms:
         specifier: ^2.1.3
         version: 2.1.3
@@ -2315,7 +2318,7 @@ snapshots:
 
   '@types/yauzl@2.10.3':
     dependencies:
-      '@types/node': 20.19.39
+      '@types/node': 25.6.0
     optional: true
 
   '@vitejs/plugin-react@4.7.0(vite@6.4.2(@types/node@25.6.0)(jiti@2.6.1))':
