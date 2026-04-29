@@ -53,7 +53,7 @@ import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
-import extract from 'extract-zip';
+import yauzl from 'yauzl';
 
 const GAME_INSTALL_ROOT = join(app.getPath('appData'), 'RemnantLauncher', 'game');
 const GAME_STATE_FILE   = join(app.getPath('appData'), 'RemnantLauncher', 'game-state.json');
@@ -260,7 +260,7 @@ async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProg
   onPhase?.('installing');
   await fs.mkdir(stagingDir, { recursive: true });
   try {
-    await extract(archiveTemp, { dir: stagingDir });
+    await unzipBufferedWrites(archiveTemp, stagingDir);
   } catch (err) {
     await rmrf(stagingDir);
     try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
@@ -330,6 +330,90 @@ async function rmrf(dir) {
 // electron-builder's zip target may put it directly at the root or
 // inside a single inner dir. Returns the path to the dir containing
 // RemnantGame.exe, or null if not found.
+/**
+ * Unzip an archive into destDir using fs.writeFile(buffer) per entry,
+ * NOT createWriteStream. Reason: Electron 33's asar-integrity hook
+ * fires on fs.open of any path matching `resources/app.asar` (suffix
+ * match), which createWriteStream triggers — even when the integrity
+ * fuse is disabled, the build-time stamp on the binary keeps the
+ * runtime open-hook armed. fs.writeFile takes a different code path
+ * that buffers the data + writes once, bypassing the hook.
+ *
+ * Streams the entry through yauzl + getBuffer + writeFile rather than
+ * pipeline(readStream, writeStream). For our 200 MB game zip this
+ * peaks memory at ~50 MB (largest single entry — the inner game's
+ * app.asar) which is fine for desktop.
+ */
+function unzipBufferedWrites(archivePath, destDir) {
+  return new Promise((resolve, reject) => {
+    yauzl.open(archivePath, { lazyEntries: true }, (err, zipfile) => {
+      if (err) return reject(err);
+
+      let pending = 0;
+      let cancelled = false;
+      let closed = false;
+
+      const finish = () => {
+        if (cancelled) return;
+        if (!closed || pending > 0) return;
+        resolve();
+      };
+
+      const fail = (err) => {
+        if (cancelled) return;
+        cancelled = true;
+        try { zipfile.close(); } catch { /* ignore */ }
+        reject(err);
+      };
+
+      zipfile.on('error', fail);
+      zipfile.on('close', () => { closed = true; finish(); });
+
+      zipfile.on('entry', async (entry) => {
+        if (cancelled) return;
+
+        // Directory entries — mkdir + read next.
+        if (/\/$/.test(entry.fileName)) {
+          try {
+            await fs.mkdir(join(destDir, entry.fileName), { recursive: true });
+          } catch (e) { return fail(e); }
+          zipfile.readEntry();
+          return;
+        }
+
+        // Path traversal guard — borrowed from extract-zip.
+        const target = join(destDir, entry.fileName);
+        const canonicalDestDir = await fs.realpath(destDir).catch(() => destDir);
+        if (!target.startsWith(canonicalDestDir)) {
+          return fail(new Error(`Out of bound path "${target}"`));
+        }
+
+        pending++;
+        zipfile.openReadStream(entry, async (err, readStream) => {
+          if (err) { pending--; return fail(err); }
+          const chunks = [];
+          readStream.on('data', (c) => chunks.push(c));
+          readStream.on('error', (e) => { pending--; fail(e); });
+          readStream.on('end', async () => {
+            try {
+              await fs.mkdir(dirname(target), { recursive: true });
+              await fs.writeFile(target, Buffer.concat(chunks));
+            } catch (e) {
+              pending--;
+              return fail(e);
+            }
+            pending--;
+            zipfile.readEntry();
+            finish();
+          });
+        });
+      });
+
+      zipfile.readEntry();
+    });
+  });
+}
+
 async function resolveInstallRoot(stagingDir) {
   // Direct hit?
   try {
