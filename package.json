@@ -36,18 +36,5 @@
       "electron",
       "esbuild"
     ]
-  },
-  "build": {
-    "appId": "com.bmtuer.remnantlauncher",
-    "productName": "Remnant Launcher",
-    "win": {
-      "icon": "build/icon.ico"
-    },
-    "extraResources": [
-      {
-        "from": "build/icon.ico",
-        "to": "icon.ico"
-      }
-    ]
   }
 }

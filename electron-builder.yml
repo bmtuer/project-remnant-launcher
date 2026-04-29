@@ -18,6 +18,15 @@ files:
   - package.json
   - node_modules/**/*
 
+# Ship build/icon.ico into resources/icon.ico of the packaged app so the
+# runtime APP_ICON_PATH resolver in src/main/index.js can find it via
+# process.resourcesPath. Used by BrowserWindow `icon:` and the system
+# tray. The win.icon entry below sets the binary icon (Explorer + Start
+# Menu); this entry covers the runtime window + tray.
+extraResources:
+  - from: build/icon.ico
+    to: icon.ico
+
 win:
   target: nsis
   icon: build/icon.ico
