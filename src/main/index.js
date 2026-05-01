@@ -1,16 +1,5 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell } from 'electron';
 import { join } from 'path';
-
-// Resolve the launcher icon for runtime use (window + tray).
-// In dev, electron-vite runs from `out/main/`, so `build/icon.ico`
-// lives at `../../build/icon.ico` relative to __dirname.
-// In prod (packaged), package.json's build.extraResources copies the
-// icon to `resources/icon.ico`, accessible via `process.resourcesPath`.
-// The Windows binary icon (taskbar when pinned, Start Menu, Explorer)
-// is set separately by electron-builder via `build.win.icon`.
-const APP_ICON_PATH = app.isPackaged
-  ? join(process.resourcesPath, 'icon.ico')
-  : join(__dirname, '..', '..', 'build', 'icon.ico');
 import { readTokens, writeTokens, clearTokens } from './tokenStore.js';
 import {
   spawnGame,
@@ -28,7 +17,23 @@ import {
 } from './ipcServer.js';
 import { startLauncherUpdater, quitAndInstallLauncher } from './launcherUpdater.js';
 import { readSettings, writeSettings, peekSettings, syncAutoLaunch } from './settingsStore.js';
-import { verifyOrInstall, forceRepair, getInstalledVersion } from './gameUpdater.js';
+import {
+  verifyOrInstall,
+  forceRepair,
+  getInstalledVersion,
+  cleanupOrphans,
+} from './gameUpdater.js';
+
+// Resolve the launcher icon for runtime use (window + tray).
+// In dev, electron-vite runs from `out/main/`, so `build/icon.ico`
+// lives at `../../build/icon.ico` relative to __dirname.
+// In prod (packaged), package.json's build.extraResources copies the
+// icon to `resources/icon.ico`, accessible via `process.resourcesPath`.
+// The Windows binary icon (taskbar when pinned, Start Menu, Explorer)
+// is set separately by electron-builder via `build.win.icon`.
+const APP_ICON_PATH = app.isPackaged
+  ? join(process.resourcesPath, 'icon.ico')
+  : join(__dirname, '..', '..', 'build', 'icon.ico');
 
 // ─── Single-instance lock ─────────────────────────────────────────────
 // Required for the `remnant://` protocol handoff. When the game spawns
@@ -273,32 +278,48 @@ function registerIpc() {
     // reliably receive stdin from the parent, so we use the named pipe
     // (which we needed anyway for runtime token refresh).
     const nonce = stageBundle(bundle);
-    return new Promise((resolve) => {
-      const child = spawnGame(bundle, {
-        handoff: {
-          pipePath: getPipePath(),
-          nonce,
-        },
-        onSpawnError: (err) => {
-          // Drop the staged bundle — game never connected to consume it.
-          dropStagedBundle(nonce);
-          mainWindow?.webContents.send('game:spawn-error', {
-            code: err.code ?? 'UNKNOWN',
-            message: err.message,
-          });
-          resolve({ ok: false, error: err.code ?? 'spawn-failed' });
-        },
-        onExit: (code) => {
-          // Game exited. Drop the staged bundle if the game never
-          // consumed it (rare — would mean game died before connecting).
-          dropStagedBundle(nonce);
-          showLauncherWindows();
-          mainWindow?.webContents.send('game:exited', { code });
-        },
-      });
-      if (child) {
-        hideLauncherWindows();
-        resolve({ ok: true });
+    // spawnGame is async (reads game-state.json to find the active
+    // version's installDir before spawning). Wrap in a Promise that
+    // resolves once we know spawn-success state.
+    return new Promise(async (resolve) => {
+      let resolved = false;
+      try {
+        const child = await spawnGame(bundle, {
+          handoff: {
+            pipePath: getPipePath(),
+            nonce,
+          },
+          onSpawnError: (err) => {
+            // Drop the staged bundle — game never connected to consume it.
+            dropStagedBundle(nonce);
+            mainWindow?.webContents.send('game:spawn-error', {
+              code: err.code ?? 'UNKNOWN',
+              message: err.message,
+            });
+            if (!resolved) {
+              resolved = true;
+              resolve({ ok: false, error: err.code ?? 'spawn-failed' });
+            }
+          },
+          onExit: (code) => {
+            // Game exited. Drop the staged bundle if the game never
+            // consumed it (rare — would mean game died before connecting).
+            dropStagedBundle(nonce);
+            showLauncherWindows();
+            mainWindow?.webContents.send('game:exited', { code });
+          },
+        });
+        if (child && !resolved) {
+          resolved = true;
+          hideLauncherWindows();
+          resolve({ ok: true });
+        }
+      } catch (err) {
+        dropStagedBundle(nonce);
+        if (!resolved) {
+          resolved = true;
+          resolve({ ok: false, error: err.message });
+        }
       }
     });
   });
@@ -447,6 +468,19 @@ app.whenReady().then(async () => {
   const startupUrl = process.argv.find((a) => a.startsWith('remnant://'));
   if (startupUrl) pendingProtocolUrls.push(startupUrl);
 
+  // ─── Game-install orphan cleanup ────────────────────────────────
+  // Sweep any unreferenced version directories + .tmp.zip files from
+  // game-versions/. Best-effort — failures (e.g. a directory locked by
+  // Defender / cloud-sync / kernel-pinned handle) are logged + skipped
+  // so they don't block boot. Versioned-install architecture means
+  // stuck old version dirs are harmless: the active version lives at
+  // its own unique path, never shares with stuck orphans.
+  try {
+    await cleanupOrphans();
+  } catch (err) {
+    console.warn('[boot] cleanupOrphans failed (non-fatal):', err.message);
+  }
+
   registerIpc();
 
   // Hydrate persistent settings before any window/tray work — populates
@@ -497,4 +531,3 @@ app.on('before-quit', () => {
   stopIpcServer();
   if (isGameRunning()) killGame();
 });
-

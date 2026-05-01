@@ -50,11 +50,11 @@ export default function HomeScreen() {
     if (selectedRealmId) loadInstalledVersion(selectedRealmId);
   }, [selectedRealmId, loadInstalledVersion]);
 
-  // Background verify/install on home mount + on realm change. The
-  // main-process session cache makes the second-onwards call cheap
-  // (just a manifest fetch + version-string compare). On a fresh
-  // launcher boot or a different realm with no install, this is the
-  // path that downloads the game binary.
+  // Background verify/install on home mount + on realm change.
+  // gameUpdater's verifyOrInstall is cheap when the active version
+  // already matches the manifest (just a manifest fetch + version
+  // compare). On a fresh launcher boot or a version mismatch, this
+  // is the path that downloads the game binary.
   useEffect(() => {
     if (appState !== 'home') return;
     if (!selectedRealmId) return;
@@ -65,13 +65,21 @@ export default function HomeScreen() {
 
   // ── Play button state machine ─────────────────────────────────
   // Folds: realm status, app-state (playing / not), update phase,
-  // and version-vs-installed comparison into a single discriminator.
+  // into a single discriminator. Versioned-install architecture means
+  // updates apply in-place during a normal session — no "restart to
+  // update" handshake needed. Player sees: Play → Updating X% →
+  // Installing… → Play, all inside one launcher session.
   const playStatus = derivePlayStatus({
     appState,
     activeRealm,
     updatePhase: updateState.phase,
     updatePercent: updateState.percent,
   });
+
+  const handlePlayClick = () => {
+    if (playStatus.disabled) return;
+    launchGame();
+  };
 
   return (
     <div className="home-screen">
@@ -214,10 +222,7 @@ export default function HomeScreen() {
         <button
           type="button"
           className={`btn play-button ${playStatus.btnClass}`}
-          onClick={() => {
-            if (playStatus.disabled) return;
-            launchGame();
-          }}
+          onClick={handlePlayClick}
           disabled={playStatus.disabled}
           aria-disabled={playStatus.disabled}
           title={playStatus.title}
@@ -234,17 +239,28 @@ export default function HomeScreen() {
         />
       )}
 
-      {/* Bottom-left corner — game version readout. Mirrors the launcher
-          version's prior placement; this slot now carries what players
-          actually look for ("am I on v0.7.4?"). Empty until a game has
-          been installed. */}
-      {installedVersion && (
+      {/* Bottom-left game version readout. Hidden while an update is
+          in flight (would compete visually with the progress strip in
+          the footer immediately above it) — reappears once the phase
+          settles. The progress strip itself sits centered/right of the
+          footer; the version sits in the absolute bottom-left corner.
+          They were colliding when both wanted the same vertical band. */}
+      {installedVersion && shouldShowVersionLabel(updateState.phase) && (
         <div className="home-game-version" aria-label={`Game version ${installedVersion}`}>
           Game v{installedVersion}
         </div>
       )}
     </div>
   );
+}
+
+// The version label should be visible only when the launcher is not
+// in the middle of an update flow. Phases that mean "settled, normal
+// idle/play state": idle, done. Everything else means an update is
+// somewhere in flight — strip is visible — version label hides to
+// avoid competing for the bottom-left band.
+function shouldShowVersionLabel(phase) {
+  return phase === 'idle' || phase === 'done';
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────
@@ -296,26 +312,38 @@ function RealmSelect({ realms, value, onChange, activeRealm }) {
 }
 
 /** Footer progress strip. Renders during active update phases; hidden
- *  when idle / done / error. accent-info bar over bg-recessed track,
- *  matches the LauncherUpdateBanner from PR 4 for visual consistency
- *  across the two update flows. */
+ *  when idle / done. On error, renders only the failure label — the
+ *  progress track is suppressed so the carry-over fill from the last
+ *  `phase: downloading` event doesn't appear stacked behind the
+ *  "Update failed" text. */
 function UpdateProgressStrip({ update }) {
   const { phase, percent, downloaded, total, version } = update;
   if (phase === 'idle' || phase === 'done') return null;
 
   const labelByPhase = {
-    manifest:   'Checking for updates…',
-    verifying:  'Verifying files…',
+    manifest:    'Checking for updates…',
+    verifying:   'Verifying files…',
     downloading: version ? `Downloading v${version}…` : 'Downloading update…',
-    installing: 'Installing…',
-    error:      'Update failed',
+    installing:  'Installing update…',
+    error:       'Update failed',
   };
   const label = labelByPhase[phase] ?? '';
 
-  // "downloading" + "installing" can show real percent. Other phases
-  // get an indeterminate shimmer (no percent rendered).
-  const showPercent = phase === 'downloading' || phase === 'installing';
-  const showIndeterminate = phase === 'manifest' || phase === 'verifying';
+  // Error state: label only, no track. The percent value retained from
+  // the last downloading event would otherwise paint a misleading bar.
+  if (phase === 'error') {
+    return (
+      <div className="home-update-strip is-error" role="status" aria-live="polite">
+        <span className="home-update-label">{label}</span>
+      </div>
+    );
+  }
+
+  // "downloading" shows real percent. Other phases get an indeterminate
+  // shimmer (no percent rendered).
+  const showPercent = phase === 'downloading';
+  const showIndeterminate =
+    phase === 'manifest' || phase === 'verifying' || phase === 'installing';
 
   return (
     <div className="home-update-strip" role="status" aria-live="polite">

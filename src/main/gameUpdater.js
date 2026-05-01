@@ -1,90 +1,90 @@
 // Per-realm game-binary install + verify + update.
 //
-// Protocol:
-//   1. Fetch manifest from <game-api>/launcher/game-update-info?env={env}
-//      → server 302s to GitHub-signed manifest.json URL
-//      → we follow + parse JSON
-//   2. Manifest declares: version, archive filename, sha512 of the
-//      archive, size
-//   3. Compare manifest version to per-realm installed version (from
-//      userData/game-state.json)
-//   4. If outdated or missing: download via /launcher/game-binary?env=X&version=Y
-//      → server 302s to GitHub-signed .zip URL
-//      → we stream bytes to disk while computing sha512 of the archive
-//   5. Verify sha512 matches manifest. On success, unzip to a staging
-//      subdir, atomically replace the active install with it, delete
-//      the .zip, update game-state.json.
+// Architecture: versioned install paths (Steam-style)
+// ────────────────────────────────────────────────────
+// Each game version installs to a UNIQUE directory that is never
+// reused. The "active" install is just a pointer in the state file
+// — switching versions is a state-file write, not a directory swap.
 //
-// Why .zip + unzip rather than a portable .exe directly:
-//   electron-builder's portable target wraps the app in a self-
-//   extracting wrapper exe. That wrapper unpacks to a tmpdir on each
-//   launch and re-spawns the inner Electron — env/argv/stdin don't
-//   propagate cleanly across the indirection (we hit this with the
-//   original stdin handoff before pivoting to named-pipe IPC; even
-//   with env-var-only handoff the per-launch unpack overhead and
-//   tmpdir lifecycle are wrong shape for a 200 MB game). The .zip
-//   target produces a normal unpacked Electron app dir; the launcher
-//   unzips once into the install root and spawns RemnantGame.exe
-//   directly. See electron-builder issue #1410 for the wrapper's
-//   underlying limitations.
+// This sidesteps every class of "can't replace the active install
+// dir" failure we observed in earlier designs:
+//   - Windows EPERM on directory rename when handles are open inside
+//   - EBUSY on file rename / copy when AV / cloud-sync / kernel
+//     delayed-release pin individual files
+//   - ENOENT-disguise from Electron 33's asar-integrity hook (which
+//     fires on path-suffix matches of `resources/app.asar` and
+//     intercepts open calls disguised as ENOENT)
 //
-// Session cache:
-//   Once a verify succeeds for an (env, version) pair, remember it
-//   in-memory until launcher restart. Subsequent Play clicks on the
-//   same (env, version) skip the verify+update step.
+// Because each new install is at a fresh path that has NEVER existed
+// before, none of the above can apply: no prior handles exist on the
+// path because the path itself is new. Old-version directories may
+// have lingering pinned handles, but we never need to MUTATE them
+// to install the new version — we just leave them alone and update
+// the active pointer.
 //
-// Per-realm install layout:
-//   %APPDATA%/RemnantLauncher/game/{env}/        ← active install
-//                                  RemnantGame.exe
-//                                  resources/
-//                                  ...
-//   %APPDATA%/RemnantLauncher/game/{env}.staging/ ← unzip target
-//   gameSpawner.js resolves the inner RemnantGame.exe from this layout.
+// Industry pattern: Steam does this (steamapps/common/<game>/ is
+// active, but updates stage to a sibling dir and switch the manifest
+// pointer). Battle.net does this. Cleanup of old version dirs is
+// best-effort — if a directory can't be deleted because of a lingering
+// OS-level pin, it's harmless disk space, not a functional blocker.
+//
+// Layout:
+//   %APPDATA%/RemnantLauncher/game-versions/
+//     test-0.8.2/                    ← OLD version, may be locked
+//       RemnantGame.exe
+//       resources/app.asar
+//     test-0.8.3/                    ← ACTIVE version (per state file)
+//       RemnantGame.exe
+//       resources/app.asar
+//     test-0.8.3.tmp.zip             ← in-flight download (deleted on success)
 //
 // State file:
 //   %APPDATA%/RemnantLauncher/game-state.json
-//   { test: { version: '0.8.2', sha512: '...', installedAt: '...' } }
-//
-// Emits progress to the renderer via 'game-update:status' events.
+//   {
+//     test: {
+//       active: "0.8.3",                          ← pointer to current
+//       versions: {
+//         "0.8.3": {
+//           sha512: "...",
+//           installedAt: "...",
+//           installDir: "<absolute-path>"
+//         }
+//       }
+//     }
+//   }
 
 import { app } from 'electron';
 import { promises as fs, createWriteStream } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { createHash } from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { Readable, Transform } from 'node:stream';
 import yauzl from 'yauzl';
 
-const GAME_INSTALL_ROOT = join(app.getPath('appData'), 'RemnantLauncher', 'game');
-const GAME_STATE_FILE   = join(app.getPath('appData'), 'RemnantLauncher', 'game-state.json');
+const LAUNCHER_DATA_ROOT = join(app.getPath('appData'), 'RemnantLauncher');
+const GAME_VERSIONS_ROOT = join(LAUNCHER_DATA_ROOT, 'game-versions');
+const GAME_STATE_FILE    = join(LAUNCHER_DATA_ROOT, 'game-state.json');
 
-// Session-only verify cache: { 'test@0.7.2': true }. Cleared on
-// launcher restart. Set by verifyOrInstall() when a verify succeeds;
-// future Play clicks for the same key skip straight to spawn.
-const verifyCache = new Set();
-
-// In-flight tracking — keyed by env. Holds the Promise of the running
-// flow so concurrent callers (HomeScreen mount effect + App.jsx
-// minClientVersion subscriber + Socket.io reconnect re-fetch) all
-// dedupe to the same flow rather than racing each other and
-// stomping on the .tmp file mid-download.
-//
-// This guard lives in main (not the renderer's gameStore) because
-// the renderer's view of update.phase is async — by the time the
-// renderer's status reducer sees phase: 'manifest', a second IPC
-// request may already be in flight. Main is the only place that
-// can authoritatively know "a flow is currently running for this
-// env."
+// Concurrent-call dedupe per env. Two callers (e.g. home-mount effect
+// + a Socket.io minClientVersion bump) hitting verifyOrInstall in the
+// same window get the same Promise. Without this guard, the second
+// caller could race the first's download into the same temp file.
 const inFlightByEnv = new Map();
 
-function gameDirForEnv(env) {
-  return join(GAME_INSTALL_ROOT, env);
+// ─── Path helpers ──────────────────────────────────────────────
+
+function versionInstallDir(env, version) {
+  return join(GAME_VERSIONS_ROOT, `${env}-${version}`);
 }
-function gameBinaryPath(env) {
-  return join(gameDirForEnv(env), 'RemnantGame.exe');
+function versionTempZip(env, version) {
+  return join(GAME_VERSIONS_ROOT, `${env}-${version}.tmp.zip`);
+}
+function gameBinaryInDir(installDir) {
+  return join(installDir, 'RemnantGame.exe');
 }
 
 // ─── State file ────────────────────────────────────────────────
+
 async function readGameState() {
   try {
     const raw = await fs.readFile(GAME_STATE_FILE, 'utf8');
@@ -94,55 +94,49 @@ async function readGameState() {
     return {};
   }
 }
+
 async function writeGameState(state) {
   await fs.mkdir(dirname(GAME_STATE_FILE), { recursive: true });
   await fs.writeFile(GAME_STATE_FILE, JSON.stringify(state, null, 2), 'utf8');
 }
+
+/** Returns the active version string for env, or null if none installed. */
 export async function getInstalledVersion(env) {
   const state = await readGameState();
-  return state[env]?.version ?? null;
+  return state[env]?.active ?? null;
+}
+
+/** Returns the absolute path to the active game binary for env, or
+ *  null if not installed / state is malformed. Used by gameSpawner to
+ *  resolve the .exe to launch. */
+export async function getActiveGameBinaryPath(env) {
+  const state = await readGameState();
+  const active = state[env]?.active;
+  if (!active) return null;
+  const meta = state[env]?.versions?.[active];
+  if (!meta?.installDir) return null;
+  return gameBinaryInDir(meta.installDir);
 }
 
 // ─── Manifest fetch ────────────────────────────────────────────
 //
-// The launcher-server endpoint /launcher/game-update-info returns a
-// 302 to the GitHub-signed URL of the latest release's manifest.json.
-// We follow the redirect (default fetch behavior) and parse JSON.
-//
-// Manifest shape (custom — owned by us, not electron-builder):
+// Manifest shape (custom — owned by the game's release script):
 //   {
-//     "version": "0.8.1",
-//     "path": "RemnantGame-0.8.1.exe",
-//     "sha512": "<base64>",
-//     "size": 132404470,
-//     "releasedAt": "2026-04-28T23:12:17Z"
+//     "version": "0.8.3",
+//     "path":    "RemnantGame-0.8.3.zip",
+//     "sha512":  "<base64>",
+//     "size":    218000000,
+//     "releasedAt": "2026-04-30T..."
 //   }
-//
-// Generated by the game repo's release script
-// (scripts/release/lib/manifest.mjs) and uploaded as a sibling asset
-// to the .exe on the GitHub release. The contract is intentionally
-// minimal — version + path + sha512 + size are what verifyOrInstall
-// actually consumes.
 async function fetchManifest({ apiBase, env, jwt }) {
   const url = `${apiBase}/launcher/game-update-info?env=${encodeURIComponent(env)}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${jwt}` },
-  });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${jwt}` } });
   if (!res.ok) {
     throw new Error(`Manifest fetch ${res.status}: ${await res.text().catch(() => '')}`);
   }
   const json = await res.json();
-  return parseManifest(json);
-}
-
-function parseManifest(json) {
-  if (!json || typeof json !== 'object') {
-    throw new Error('Manifest is not an object.');
-  }
-  if (!json.version || !json.path || !json.sha512) {
-    throw new Error(
-      `Manifest missing required fields. Got keys: ${Object.keys(json).join(', ')}`,
-    );
+  if (!json?.version || !json?.path || !json?.sha512) {
+    throw new Error(`Manifest missing required fields. Got keys: ${Object.keys(json ?? {}).join(', ')}`);
   }
   return {
     version: String(json.version),
@@ -152,83 +146,67 @@ function parseManifest(json) {
   };
 }
 
-// ─── Verify ────────────────────────────────────────────────────
+// ─── Existing-install verify ──────────────────────────────────
 //
-// The manifest sha512 is the hash of the .zip we downloaded, not of
-// the unpacked RemnantGame.exe — re-hashing the .exe wouldn't compare
-// against anything authoritative. So "verify installed" is just a
-// file-existence + state-file-version-match check. The download path
-// is what enforces integrity (verify .zip's sha512 against the
-// manifest before unzipping); after that, the install dir's contents
-// are trusted until the next download.
-async function verifyInstalledBinary({ env, manifest }) {
-  const binaryPath = gameBinaryPath(env);
-  try {
-    await fs.access(binaryPath);
-  } catch {
-    return false;  // No binary installed yet
-  }
+// "Verify" means: the active version per state matches the manifest,
+// AND the binary exists on disk. We don't re-hash the install
+// contents — the sha512 in the manifest is for the .zip, not the
+// unpacked dir, and re-hashing every file each launch isn't worth
+// the cost. Integrity is enforced at download time; corruption after
+// install is rare and forceRepair handles it.
+async function verifyActive({ env, manifest }) {
   const state = await readGameState();
-  return state[env]?.version === manifest.version;
+  if (state[env]?.active !== manifest.version) return false;
+  const installDir = state[env]?.versions?.[manifest.version]?.installDir;
+  if (!installDir) return false;
+  try {
+    await fs.access(gameBinaryInDir(installDir));
+    return true;
+  } catch {
+    return false;
+  }
 }
 
-// ─── Download ──────────────────────────────────────────────────
+// ─── Download + install (the actual update path) ──────────────
 //
-// Stream the .zip from /launcher/game-binary into a sibling temp
-// path next to the active install dir, compute sha512 in-flight,
-// verify against manifest. Then unzip into a staging dir, swap the
-// staging dir over the active dir atomically (rename-old-aside →
-// rename-staging-into-place → rm-old-aside), and clean up the .zip.
+// 1. Stream zip to <env>-<version>.tmp.zip while computing sha512.
+// 2. Verify sha512 against manifest.
+// 3. Unzip into <env>-<version>/ — a fresh path that has never
+//    existed before. No prior locks possible.
+// 4. Resolve the install root (electron-builder's zip target may
+//    nest the app inside a single inner dir).
+// 5. State atomic: set active = new version, add to versions map.
+// 6. Cleanup .zip + best-effort old-version dir cleanup.
 //
-// Failure modes the order above guards against:
-//   - download crash mid-stream → .tmp file gets unlinked, no
-//     visible state change to the active install.
-//   - sha512 mismatch → .tmp deleted before unzip, no visible
-//     state change.
-//   - unzip crash → staging dir is rm-rf'd, .zip is deleted, active
-//     install untouched.
-//   - rename-old-aside succeeds but rename-staging-into-place fails
-//     → we restore the old install from the aside dir before
-//     surfacing the error. The window where the install dir is
-//     missing entirely is a few ms of two os.rename calls.
-//
-// Progress is emitted to the renderer every ~100ms during download.
-// Unzip is fast enough on a 130MB archive (~2s on typical disks)
-// that we just emit phase: 'installing' once when it starts.
-async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProgress, onPhase }) {
+// If anything in steps 1-5 fails, the active install is unchanged —
+// we leave the old version still active because we never touched it.
+async function downloadAndInstall({ apiBase, env, version, jwt, manifest, onProgress, onPhase }) {
+  await fs.mkdir(GAME_VERSIONS_ROOT, { recursive: true });
+
+  const installDir = versionInstallDir(env, version);
+  const zipTemp    = versionTempZip(env, version);
+
+  // Defensive cleanup: if a previous attempt for this exact version
+  // half-completed, clear its artifacts. Note: this is for re-attempts
+  // of the SAME version (rare); we never reuse a path across DIFFERENT
+  // versions, so cross-version collisions are impossible.
+  await tryRmrf(installDir);
+  try { await fs.unlink(zipTemp); } catch { /* ignore — file may not exist */ }
+
+  // ── Stage 1: stream + hash ──
   const url = `${apiBase}/launcher/game-binary?env=${encodeURIComponent(env)}&version=${encodeURIComponent(version)}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${jwt}` },
-  });
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${jwt}` } });
   if (!res.ok) {
     throw new Error(`Game binary fetch ${res.status}: ${await res.text().catch(() => '')}`);
   }
-  if (!res.body) {
-    throw new Error('Game binary fetch returned empty body.');
-  }
+  if (!res.body) throw new Error('Game binary fetch returned empty body.');
 
   const total = manifest.size ?? Number(res.headers.get('content-length')) ?? 0;
   let downloaded = 0;
   const hash = createHash('sha512');
-
-  const activeDir   = gameDirForEnv(env);
-  const stagingDir  = `${activeDir}.staging`;
-  const oldAsideDir = `${activeDir}.old`;
-  const archiveTemp = join(dirname(activeDir), `${manifest.path ?? 'game'}.tmp`);
-
-  // Make sure parent dir exists for the archive temp.
-  await fs.mkdir(dirname(activeDir), { recursive: true });
-
-  // Drop any prior staging / aside / .tmp from a crashed previous
-  // attempt so we start clean.
-  await rmrf(stagingDir);
-  await rmrf(oldAsideDir);
-  try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
-
-  // ── Stage 1: stream + hash + write to .tmp archive ──
-  const out = createWriteStream(archiveTemp);
   let lastProgressEmit = 0;
 
+  const out = createWriteStream(zipTemp);
   const source = Readable.fromWeb(res.body);
   const tap = new Transform({
     transform(chunk, _enc, cb) {
@@ -250,100 +228,256 @@ async function downloadGameBinary({ apiBase, env, version, jwt, manifest, onProg
   // ── Stage 2: verify sha512 ──
   const computed = hash.digest('base64');
   if (computed !== manifest.sha512) {
-    try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+    try { await fs.unlink(zipTemp); } catch { /* ignore */ }
     throw new Error(
       `sha512 mismatch — download corrupted (got ${computed.slice(0, 16)}…, expected ${manifest.sha512.slice(0, 16)}…)`,
     );
   }
 
-  // ── Stage 3: unzip into staging dir ──
+  // ── Stage 3: unzip into the fresh per-version dir ──
   onPhase?.('installing');
-  await fs.mkdir(stagingDir, { recursive: true });
+  await fs.mkdir(installDir, { recursive: true });
   try {
-    await unzipBufferedWrites(archiveTemp, stagingDir);
+    await unzipBufferedWrites(zipTemp, installDir);
   } catch (err) {
-    await rmrf(stagingDir);
-    try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+    await tryRmrf(installDir);
+    try { await fs.unlink(zipTemp); } catch { /* ignore */ }
     throw new Error(`Unzip failed: ${err.message}`);
   }
 
-  // electron-builder's zip target wraps the unpacked app in an inner
-  // dir named after productName (e.g. "RemnantGame-win32-x64/").
-  // Resolve which subdir actually contains RemnantGame.exe so we can
-  // promote either layout (with-or-without inner dir) into the active
-  // install path.
-  const installRoot = await resolveInstallRoot(stagingDir);
-  if (!installRoot) {
-    await rmrf(stagingDir);
-    try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
+  // electron-builder's zip target sometimes nests the app inside a
+  // single inner dir (e.g. RemnantGame-win32-x64/). Resolve which
+  // dir actually contains RemnantGame.exe; if it's an inner dir,
+  // promote that dir's contents to the outer.
+  const finalInstallDir = await resolveAndPromoteInstallRoot(installDir);
+  if (!finalInstallDir) {
+    await tryRmrf(installDir);
+    try { await fs.unlink(zipTemp); } catch { /* ignore */ }
     throw new Error('Unzipped archive did not contain RemnantGame.exe');
   }
 
-  // ── Stage 4: atomic-ish swap ──
-  // Rename existing active install aside (if present), then rename
-  // installRoot into the active path. Restore on failure.
-  let hadExisting = false;
-  try {
-    await fs.access(activeDir);
-    hadExisting = true;
-  } catch { /* no prior install — fine */ }
-
-  if (hadExisting) {
-    await fs.rename(activeDir, oldAsideDir);
-  }
-  try {
-    await fs.rename(installRoot, activeDir);
-  } catch (err) {
-    // Restore the old install if we just removed it. Best-effort.
-    if (hadExisting) {
-      try { await fs.rename(oldAsideDir, activeDir); } catch { /* ignore */ }
-    }
-    await rmrf(stagingDir);
-    try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
-    throw new Error(`Install rename failed: ${err.message}`);
-  }
+  // ── Stage 4: state atomic — set this version active ──
+  const state = await readGameState();
+  const previousActive = state[env]?.active ?? null;
+  state[env] = state[env] ?? {};
+  state[env].versions = state[env].versions ?? {};
+  state[env].versions[version] = {
+    sha512:      manifest.sha512,
+    installedAt: new Date().toISOString(),
+    installDir:  finalInstallDir,
+  };
+  state[env].active = version;
+  await writeGameState(state);
 
   // ── Stage 5: cleanup ──
-  await rmrf(stagingDir);
-  await rmrf(oldAsideDir);
-  try { await fs.unlink(archiveTemp); } catch { /* ignore */ }
-
-  // ── Stage 6: state ──
-  const state = await readGameState();
-  state[env] = {
-    version: manifest.version,
-    sha512:  manifest.sha512,
-    installedAt: new Date().toISOString(),
-  };
-  await writeGameState(state);
+  // .zip is no longer needed; old version dirs become eligible for
+  // best-effort delete. Failures here are silent and harmless.
+  try { await fs.unlink(zipTemp); } catch { /* ignore */ }
+  if (previousActive && previousActive !== version) {
+    cleanupOldVersionInBackground(env, previousActive);
+  }
 }
 
-// rm -rf with a try/catch wrapper. Returns void; failure is silent
-// because we use this in cleanup paths where a missing dir is normal.
-async function rmrf(dir) {
+// ─── Background cleanup of old version dirs ───────────────────
+//
+// Runs detached from the install flow. If a previous version's dir
+// is still locked by Defender / cloud-sync / whatever, the cleanup
+// fails silently — it's harmless disk space until the next launcher
+// session retries. We also remove the old version's entry from the
+// state.versions map so we don't claim it's installed when its files
+// might already be partially gone.
+function cleanupOldVersionInBackground(env, oldVersion) {
+  // Don't await — fire and forget. Errors logged, never thrown.
+  (async () => {
+    const oldDir = versionInstallDir(env, oldVersion);
+    try {
+      await fs.rm(oldDir, { recursive: true, force: true });
+      // Successful delete: also remove from state.
+      const state = await readGameState();
+      if (state[env]?.versions?.[oldVersion]) {
+        delete state[env].versions[oldVersion];
+        await writeGameState(state);
+      }
+    } catch (err) {
+      // Pinned by OS — leave on disk, leave in state. Will retry next
+      // session via cleanupOrphans.
+      console.warn(`[gameUpdater] could not delete old version ${oldVersion}: ${err.message}`);
+    }
+  })();
+}
+
+// ─── Legacy cleanup ─────────────────────────────────────────────
+//
+// Pre-versioned-install launchers used:
+//   %APPDATA%/RemnantLauncher/game/{env}/   (active install)
+//   %APPDATA%/RemnantLauncher/game/{env}.staging/  (staging dir)
+//   %APPDATA%/RemnantLauncher/game/{env}.old/  (rename-aside dir)
+// And state file entries with shape { version, sha512, installedAt }.
+//
+// New launchers use game-versions/ entirely. Legacy installs are
+// ignored at runtime (state's `active` pointer will be undefined,
+// triggering a fresh download to the new path scheme on first launch).
+// This function best-effort-deletes the old dirs to reclaim disk space.
+// Failures are logged + skipped — same pattern as version cleanup.
+async function cleanupLegacyInstalls() {
+  const legacyRoot = join(LAUNCHER_DATA_ROOT, 'game');
+  let entries;
   try {
-    await fs.rm(dir, { recursive: true, force: true });
+    entries = await fs.readdir(legacyRoot, { withFileTypes: true });
+  } catch {
+    return; // Legacy root doesn't exist — clean.
+  }
+  for (const entry of entries) {
+    const path = join(legacyRoot, entry.name);
+    try {
+      if (entry.isDirectory()) {
+        await fs.rm(path, { recursive: true, force: true });
+      } else {
+        await fs.unlink(path);
+      }
+    } catch (err) {
+      console.warn(`[gameUpdater] legacy cleanup skipped ${entry.name}: ${err.code ?? err.message}`);
+    }
+  }
+  // Try to remove the now-empty parent. Failure means something is
+  // still pinned inside; harmless.
+  try { await fs.rmdir(legacyRoot); } catch { /* ignore */ }
+
+  // Migrate state: drop legacy fields if they exist on any env.
+  const state = await readGameState();
+  let mutated = false;
+  for (const env of Object.keys(state)) {
+    if (state[env]?.version !== undefined && state[env]?.active === undefined) {
+      // Legacy shape detected. Drop the legacy fields entirely; the
+      // next verifyOrInstall will trigger a fresh download under the
+      // new versioned-install scheme.
+      delete state[env].version;
+      delete state[env].sha512;
+      delete state[env].installedAt;
+      mutated = true;
+    }
+  }
+  if (mutated) await writeGameState(state);
+}
+
+// ─── Orphan cleanup at boot ───────────────────────────────────
+//
+// Called from src/main/index.js on app.whenReady. Scans the
+// game-versions/ directory + state file for:
+//   - Version dirs not referenced by any state.<env>.versions entry
+//     (orphans from a crashed install)
+//   - State.versions entries whose installDir is missing from disk
+//     (stale state)
+//   - Inactive version dirs we previously failed to clean up
+//     (every boot we get another shot at deleting them)
+//   - .tmp.zip files leftover from interrupted downloads
+//   - Legacy game/ dir from pre-versioned-install launchers
+//
+// All operations are best-effort. A stuck path stays as ~200MB of
+// disk; the active install is never affected.
+export async function cleanupOrphans() {
+  // One-time legacy cleanup — does nothing on launchers that have
+  // already migrated.
+  await cleanupLegacyInstalls();
+
+  let entries;
+  try {
+    entries = await fs.readdir(GAME_VERSIONS_ROOT, { withFileTypes: true });
+  } catch {
+    return; // Dir doesn't exist yet (fresh launcher) — nothing to clean.
+  }
+
+  const state = await readGameState();
+  // Gather all (env, version, installDir) triples we DO want to keep:
+  // the active version for each env, plus any versions still in the
+  // state.versions map (e.g. previous version we haven't cleaned yet).
+  const keep = new Set();
+  for (const env of Object.keys(state)) {
+    for (const ver of Object.keys(state[env]?.versions ?? {})) {
+      const dir = state[env].versions[ver]?.installDir;
+      if (dir) keep.add(dir);
+    }
+  }
+
+  for (const entry of entries) {
+    const fullPath = join(GAME_VERSIONS_ROOT, entry.name);
+
+    // Sweep .tmp.zip files unconditionally (they're never used after
+    // a successful install).
+    if (entry.isFile() && entry.name.endsWith('.tmp.zip')) {
+      try { await fs.unlink(fullPath); } catch { /* ignore */ }
+      continue;
+    }
+
+    // Sweep version dirs not referenced by state. Best-effort.
+    if (entry.isDirectory() && !keep.has(fullPath)) {
+      try {
+        await fs.rm(fullPath, { recursive: true, force: true });
+      } catch (err) {
+        console.warn(`[gameUpdater] orphan cleanup skipped ${entry.name}: ${err.code ?? err.message}`);
+      }
+    }
+  }
+
+  // Drop state.versions entries whose installDir vanished from disk
+  // (e.g. user manually deleted the dir).
+  let stateMutated = false;
+  for (const env of Object.keys(state)) {
+    const versions = state[env]?.versions ?? {};
+    for (const ver of Object.keys(versions)) {
+      const dir = versions[ver]?.installDir;
+      let exists = false;
+      try { await fs.access(dir); exists = true; } catch { /* missing */ }
+      if (!exists) {
+        delete state[env].versions[ver];
+        stateMutated = true;
+        // If the missing dir was the active version, clear active
+        // pointer so the next verify treats it as not-installed.
+        if (state[env].active === ver) {
+          state[env].active = null;
+          stateMutated = true;
+        }
+      }
+    }
+    // Also: try to delete inactive version dirs we previously failed
+    // to clean. Active dir stays.
+    const active = state[env]?.active;
+    for (const ver of Object.keys(state[env]?.versions ?? {})) {
+      if (ver === active) continue;
+      const dir = state[env].versions[ver]?.installDir;
+      if (!dir) continue;
+      try {
+        await fs.rm(dir, { recursive: true, force: true });
+        delete state[env].versions[ver];
+        stateMutated = true;
+      } catch {
+        // Still pinned. Leave it; we'll try again next boot.
+      }
+    }
+  }
+  if (stateMutated) await writeGameState(state);
+}
+
+// Best-effort rmrf — never throws. Used in install-flow cleanup paths
+// where a missing/locked dir is recoverable (we just log + skip).
+async function tryRmrf(path) {
+  try {
+    await fs.rm(path, { recursive: true, force: true });
   } catch { /* ignore */ }
 }
 
-// Find the directory inside `stagingDir` that contains RemnantGame.exe.
-// electron-builder's zip target may put it directly at the root or
-// inside a single inner dir. Returns the path to the dir containing
-// RemnantGame.exe, or null if not found.
-/**
- * Unzip an archive into destDir using fs.writeFile(buffer) per entry,
- * NOT createWriteStream. Reason: Electron 33's asar-integrity hook
- * fires on fs.open of any path matching `resources/app.asar` (suffix
- * match), which createWriteStream triggers — even when the integrity
- * fuse is disabled, the build-time stamp on the binary keeps the
- * runtime open-hook armed. fs.writeFile takes a different code path
- * that buffers the data + writes once, bypassing the hook.
- *
- * Streams the entry through yauzl + getBuffer + writeFile rather than
- * pipeline(readStream, writeStream). For our 200 MB game zip this
- * peaks memory at ~50 MB (largest single entry — the inner game's
- * app.asar) which is fine for desktop.
- */
+// ─── Unzip with asar-integrity-hook bypass ────────────────────
+//
+// CRITICAL: uses fs.writeFile(buffer) per entry, NOT createWriteStream.
+// Reason: Electron 33's asar-integrity hook fires on fs.open of any
+// path matching `resources/app.asar` (suffix match), even when the
+// integrity fuse is disabled. The runtime open-hook stays armed
+// against the build-time integrity stamp on the launcher binary.
+// fs.writeFile takes a different code path that buffers the data +
+// writes once, bypassing the hook.
+//
+// For our 200 MB game zip this peaks memory at ~50 MB (the largest
+// single entry — the inner game's app.asar). Acceptable for desktop.
 function unzipBufferedWrites(archivePath, destDir) {
   return new Promise((resolve, reject) => {
     yauzl.open(archivePath, { lazyEntries: true }, (err, zipfile) => {
@@ -372,7 +506,6 @@ function unzipBufferedWrites(archivePath, destDir) {
       zipfile.on('entry', async (entry) => {
         if (cancelled) return;
 
-        // Directory entries — mkdir + read next.
         if (/\/$/.test(entry.fileName)) {
           try {
             await fs.mkdir(join(destDir, entry.fileName), { recursive: true });
@@ -381,7 +514,6 @@ function unzipBufferedWrites(archivePath, destDir) {
           return;
         }
 
-        // Path traversal guard — borrowed from extract-zip.
         const target = join(destDir, entry.fileName);
         const canonicalDestDir = await fs.realpath(destDir).catch(() => destDir);
         if (!target.startsWith(canonicalDestDir)) {
@@ -414,22 +546,44 @@ function unzipBufferedWrites(archivePath, destDir) {
   });
 }
 
-async function resolveInstallRoot(stagingDir) {
+// electron-builder's zip target may put RemnantGame.exe at the root
+// of the archive OR inside a single inner dir. If at root: return
+// installDir as-is. If inside an inner dir: move the inner contents
+// up to installDir so the spawner finds RemnantGame.exe at the
+// expected path. Returns the final install dir on success, null if
+// RemnantGame.exe couldn't be located.
+async function resolveAndPromoteInstallRoot(installDir) {
   // Direct hit?
   try {
-    await fs.access(join(stagingDir, 'RemnantGame.exe'));
-    return stagingDir;
+    await fs.access(gameBinaryInDir(installDir));
+    return installDir;
   } catch { /* fall through */ }
 
   // One level deep?
-  const entries = await fs.readdir(stagingDir, { withFileTypes: true });
+  const entries = await fs.readdir(installDir, { withFileTypes: true });
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
-    const candidate = join(stagingDir, entry.name);
+    const inner = join(installDir, entry.name);
     try {
-      await fs.access(join(candidate, 'RemnantGame.exe'));
-      return candidate;
-    } catch { /* try next */ }
+      await fs.access(gameBinaryInDir(inner));
+      // Promote inner's contents up to installDir.
+      // Strategy: read inner's children, rename each to its sibling
+      // position in installDir. This avoids having to rename
+      // installDir itself (which might trip the same dir-rename
+      // EPERM we sidestepped earlier).
+      const innerEntries = await fs.readdir(inner, { withFileTypes: true });
+      for (const inEntry of innerEntries) {
+        await fs.rename(
+          join(inner, inEntry.name),
+          join(installDir, inEntry.name),
+        );
+      }
+      // Remove the now-empty inner dir.
+      try { await fs.rmdir(inner); } catch { /* ignore */ }
+      return installDir;
+    } catch {
+      // try next
+    }
   }
   return null;
 }
@@ -437,72 +591,41 @@ async function resolveInstallRoot(stagingDir) {
 // ─── Public API ────────────────────────────────────────────────
 
 /**
- * Verify the installed game; if it's missing, the manifest version
- * differs, or the sha512 doesn't match, run an install. Emits status
- * events to onStatus along the way.
+ * Verify or install the game for env. If the active install matches
+ * the manifest version + binary exists → done. Otherwise → download
+ * + install + activate the new version.
  *
- * Returns { version, alreadyVerified, didInstall }.
+ * Returns { version, didInstall }.
  *
- * @param {object} args
- * @param {string} args.apiBase  e.g. "http://localhost:3001/api/v1"
- * @param {string} args.env      e.g. "test"
- * @param {string} args.jwt      Bearer token
- * @param {(s: object) => void} args.onStatus
- *   Called with { phase: 'manifest' | 'verifying' | 'downloading' | 'installing' | 'done',
- *                 percent?, version? } at each phase.
+ * Status events:
+ *   { phase: 'manifest' }
+ *   { phase: 'verifying' }
+ *   { phase: 'downloading', version, percent, downloaded, total }
+ *   { phase: 'installing', version }
+ *   { phase: 'done', version }
  */
 export async function verifyOrInstall({ apiBase, env, jwt, onStatus }) {
-  // Concurrent-call dedupe: if a flow is already running for this env,
-  // attach to that promise. The new caller still gets status events
-  // (the existing flow's onStatus is already wired to a renderer
-  // callback, but we ALSO surface a 'done' event to the late caller
-  // so its UI state machine settles correctly).
-  //
-  // Critical: this is the guard that prevents the .tmp file from
-  // being deleted mid-download by a parallel call. The renderer-side
-  // guard in gameStore is racy because update.phase doesn't reflect
-  // an in-flight IPC call until the first onStatus event lands.
   const existing = inFlightByEnv.get(env);
-  if (existing) {
-    return existing;
-  }
+  if (existing) return existing;
 
   const promise = runVerifyOrInstall({ apiBase, env, jwt, onStatus })
-    .finally(() => {
-      inFlightByEnv.delete(env);
-    });
+    .finally(() => inFlightByEnv.delete(env));
   inFlightByEnv.set(env, promise);
   return promise;
 }
 
 async function runVerifyOrInstall({ apiBase, env, jwt, onStatus }) {
-  const installed = await getInstalledVersion(env);
-
-  // Session cache hit: we've already verified this version in this
-  // session. Skip both manifest fetch + sha512 — straight to done.
-  if (installed && verifyCache.has(`${env}@${installed}`)) {
-    onStatus?.({ phase: 'done', version: installed, alreadyVerified: true });
-    return { version: installed, alreadyVerified: true, didInstall: false };
-  }
-
   onStatus?.({ phase: 'manifest' });
   const manifest = await fetchManifest({ apiBase, env, jwt });
 
-  // Version match + integrity good → cache + return done.
-  if (installed === manifest.version) {
-    onStatus?.({ phase: 'verifying' });
-    const intact = await verifyInstalledBinary({ env, manifest });
-    if (intact) {
-      verifyCache.add(`${env}@${manifest.version}`);
-      onStatus?.({ phase: 'done', version: manifest.version });
-      return { version: manifest.version, alreadyVerified: false, didInstall: false };
-    }
-    // Hash mismatch — fall through to download (treat as repair).
+  onStatus?.({ phase: 'verifying' });
+  if (await verifyActive({ env, manifest })) {
+    onStatus?.({ phase: 'done', version: manifest.version });
+    return { version: manifest.version, didInstall: false };
   }
 
-  // Need to install.
   onStatus?.({ phase: 'downloading', version: manifest.version, percent: 0 });
-  await downloadGameBinary({
+  await downloadAndInstall({
     apiBase,
     env,
     version: manifest.version,
@@ -516,35 +639,28 @@ async function runVerifyOrInstall({ apiBase, env, jwt, onStatus }) {
     },
   });
 
-  verifyCache.add(`${env}@${manifest.version}`);
   onStatus?.({ phase: 'done', version: manifest.version });
-  return { version: manifest.version, alreadyVerified: false, didInstall: true };
+  return { version: manifest.version, didInstall: true };
 }
 
 /**
- * Force a full reinstall regardless of the current state. Used by the
- * Settings → Repair button. Same code path as verifyOrInstall, but
- * skips the version-match early-out and clears the session cache for
- * the env first.
+ * Force a full reinstall regardless of state. Used by Settings →
+ * Repair. Clears the active pointer so the verify path falls through
+ * to download. The old install dir gets best-effort cleanup after
+ * the new one is active.
  */
 export async function forceRepair({ apiBase, env, jwt, onStatus }) {
-  // If a verify/install flow is already running for this env, attach
-  // to it rather than clearing state mid-flight (which would corrupt
-  // the active download). The user's intent of "repair" is satisfied
-  // by waiting for the in-flight verify to either fail (then they can
-  // re-click Repair) or succeed (which leaves them in the right state).
   const existing = inFlightByEnv.get(env);
-  if (existing) {
-    return existing;
-  }
+  if (existing) return existing;
 
-  // Clear cache + state so the install path runs unconditionally.
-  for (const key of [...verifyCache]) {
-    if (key.startsWith(`${env}@`)) verifyCache.delete(key);
-  }
+  // Clear active pointer so verify always falls through to download.
+  // Don't touch the versions map or installDirs — cleanupOldVersionInBackground
+  // handles those after the new install activates.
   const state = await readGameState();
-  delete state[env];
-  await writeGameState(state);
+  if (state[env]) {
+    state[env].active = null;
+    await writeGameState(state);
+  }
 
   return verifyOrInstall({ apiBase, env, jwt, onStatus });
 }

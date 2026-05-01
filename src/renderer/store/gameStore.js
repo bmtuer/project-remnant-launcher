@@ -7,7 +7,7 @@ const API_BASE = import.meta.env.VITE_GAME_API_URL;
 // Wraps the main-process gameUpdater IPC. Owns the renderer-side
 // view of game-binary state:
 //
-//   - installedVersion: per-realm version string (or null if not
+//   - installedVersionByEnv: per-realm version string (or null if not
 //     installed). Loaded from main on home mount + after each
 //     successful install.
 //
@@ -17,16 +17,15 @@ const API_BASE = import.meta.env.VITE_GAME_API_URL;
 //     | done | error. Renderer subscribes via window.launcher.game
 //     .onUpdateStatus (wired once at boot in App.jsx).
 //
-// Cache-invalidation pattern (live-ops): when the server pushes a
-// new minClientVersion via the launcher-status Socket.io channel,
-// the home screen calls verifyOrInstallActive() in the background.
-// gameUpdater's verifyOrInstall has its own session cache; if the
-// version changed since last verify, the cache misses and it
-// redownloads. So we don't need to maintain our own cache here —
-// just trigger the check whenever the server-side version moves.
+// Versioned-install architecture (post-v1.0.10): each game version
+// installs to a fresh, unique directory. The "active" version is just
+// a state-file pointer — switching versions never modifies an
+// existing install dir. Eliminates the class of "can't replace the
+// active install" failures we previously hit. See gameUpdater.js
+// for full rationale.
 
 export const useGameStore = create((set, get) => ({
-  installedVersionByEnv: {},   // { test: '0.7.2', live: null, ... }
+  installedVersionByEnv: {},   // { test: '0.8.3', live: null, ... }
 
   update: {
     phase:      'idle',         // idle | manifest | verifying | downloading | installing | done | error
@@ -62,8 +61,8 @@ export const useGameStore = create((set, get) => ({
       return { update: next };
     });
 
-    // On a successful install, refresh installedVersion so the bottom-
-    // left readout updates without a window reload.
+    // On a successful install, refresh installedVersion so the
+    // bottom-left readout updates without a window reload.
     if (payload.phase === 'done' && payload.version) {
       const env = useRealmStore.getState().selectedRealmId ?? 'test';
       get().loadInstalledVersion(env);
@@ -71,10 +70,9 @@ export const useGameStore = create((set, get) => ({
   },
 
   /** Trigger verify-or-install for the currently-selected realm.
-   *  Idempotent: if a flow is already in-flight, this no-ops. The
-   *  main-process verifyOrInstall has its own session cache, so
-   *  repeated calls for an already-verified version short-circuit
-   *  immediately to phase: 'done'. */
+   *  Idempotent: if a flow is already in-flight, the main-process
+   *  inFlightByEnv guard returns the existing Promise instead of
+   *  starting a second flow. */
   verifyOrInstallActive: async () => {
     const realm = useRealmStore.getState();
     const app   = useAppStore.getState();
@@ -97,7 +95,7 @@ export const useGameStore = create((set, get) => ({
     });
   },
 
-  /** Force-repair — clears session cache + state, redownloads
+  /** Force-repair — clears active pointer + redownloads
    *  unconditionally. Used by Settings → Repair. */
   forceRepairActive: async () => {
     const realm = useRealmStore.getState();

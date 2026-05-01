@@ -907,11 +907,12 @@ input:disabled { opacity: 0.55; }
 }
 
 /* Game version readout — bottom-left corner of the home screen.
-   Sources from gameStore.installedVersionByEnv. Only renders when
-   a game is installed (no value before first install). Mirrors the
-   prior launcher-version slot's chrome but carries what players
-   actually look for. Font: Fraunces tabular like the patch-card
-   version, --text-muted to read as quiet metadata. */
+   Only renders when (a) a game is installed AND (b) no update flow
+   is in flight (gated in HomeScreen.jsx via shouldShowVersionLabel).
+   When an update is downloading / staging / pending / etc, the
+   progress strip occupies the footer band and this label hides;
+   reappears once the phase returns to idle/done/applied. Quiet
+   metadata — Fraunces tabular at --text-muted. */
 .home-game-version {
   position: absolute;
   bottom: var(--space-3);

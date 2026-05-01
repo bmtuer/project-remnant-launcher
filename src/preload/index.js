@@ -42,9 +42,17 @@ contextBridge.exposeInMainWorld('launcher', {
     //   manifest | verifying | downloading | installing | done | error
     // Renderer subscribes to this to drive the Play button state
     // machine + the progress UI.
-    verifyOrInstall: (args) => ipcRenderer.invoke('game:verifyOrInstall', args),
-    forceRepair:     (args) => ipcRenderer.invoke('game:forceRepair', args),
-    getInstalledVersion: (env) => ipcRenderer.invoke('game:getInstalledVersion', env),
+    //
+    // Phase semantics:
+    //   manifest    — fetching latest version info from server
+    //   verifying   — checking active install matches manifest
+    //   downloading — bytes streaming, with progress percent
+    //   installing  — unzipping into the new versioned install dir
+    //   done        — active install matches manifest, ready to play
+    //   error       — surfaces any failure
+    verifyOrInstall:     (args) => ipcRenderer.invoke('game:verifyOrInstall', args),
+    forceRepair:         (args) => ipcRenderer.invoke('game:forceRepair', args),
+    getInstalledVersion: (env)  => ipcRenderer.invoke('game:getInstalledVersion', env),
     onUpdateStatus: (handler) => {
       const listener = (_e, payload) => handler(payload);
       ipcRenderer.on('game-update:status', listener);

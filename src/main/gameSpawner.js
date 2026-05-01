@@ -28,16 +28,7 @@
 import { app, BrowserWindow } from 'electron';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-
-const GAME_INSTALL_ROOT = join(app.getPath('appData'), 'RemnantLauncher', 'game');
-
-// PR 5 will replace this with realm-aware path resolution. For now we
-// just look for a single binary; if not present we surface a helpful
-// error rather than silently failing.
-function resolveGameBinaryPath(env = 'test') {
-  return join(GAME_INSTALL_ROOT, env, 'RemnantGame.exe');
-}
+import { getActiveGameBinaryPath } from './gameUpdater.js';
 
 let activeChild = null;
 
@@ -60,7 +51,7 @@ export function isGameRunning() {
  * @param {object} bundle - { jwt, refreshToken, accountId, env, realmId }
  * @param {object} hooks  - { handoff: { pipePath, nonce }, onExit?, onSpawnError? }
  */
-export function spawnGame(bundle, hooks = {}) {
+export async function spawnGame(bundle, hooks = {}) {
   if (isGameRunning()) {
     throw new Error('Game is already running.');
   }
@@ -69,11 +60,17 @@ export function spawnGame(bundle, hooks = {}) {
   }
 
   const env = bundle.env ?? 'test';
-  const binaryPath = resolveGameBinaryPath(env);
+  // Resolve the active game binary path from gameUpdater's state file.
+  // Versioned-install architecture: each version installs to a unique
+  // directory; the "active" pointer in state determines which one we
+  // launch. Returns null if no active version is set.
+  const binaryPath = await getActiveGameBinaryPath(env);
 
-  if (!existsSync(binaryPath)) {
+  if (!binaryPath || !existsSync(binaryPath)) {
     const err = new Error(
-      `Game binary not found at ${binaryPath}. Run verifyOrInstall first.`,
+      binaryPath
+        ? `Game binary not found at ${binaryPath}. Run verifyOrInstall first.`
+        : `No active game version recorded for env "${env}". Run verifyOrInstall first.`,
     );
     err.code = 'GAME_BINARY_MISSING';
     hooks.onSpawnError?.(err);
