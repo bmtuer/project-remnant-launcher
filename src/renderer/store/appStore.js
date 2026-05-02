@@ -215,6 +215,52 @@ export const useAppStore = create((set, get) => ({
     }
   },
 
+  // Centralized handler for Supabase auth events fired by
+  // `supabase.auth.onAuthStateChange` (subscribed once at boot in
+  // App.jsx). Supabase autorefreshes the access_token in the background
+  // every ~50min — without this hook, the rotated token only lives in
+  // Supabase's internal client state, while our Zustand `session` slice
+  // and the on-disk token store stay frozen at hydrate-time. Result:
+  // background `verifyOrInstall` calls keep sending an expired JWT
+  // until the launcher restarts, which surfaces as "Update failed →
+  // Retry" with no obvious cause. This action keeps all three layers
+  // in sync.
+  //
+  // Events we handle:
+  //   TOKEN_REFRESHED — silently update store + persisted tokens.
+  //   SIGNED_OUT      — refresh_token expired or remote sign-out;
+  //                     send the player to auth instead of stranding
+  //                     them on a half-broken home screen.
+  //   USER_UPDATED    — same shape as TOKEN_REFRESHED for our
+  //                     purposes (email change etc).
+  //   SIGNED_IN / INITIAL_SESSION — handled by hydrate/signIn paths;
+  //                     ignore here to avoid double-application.
+  applyAuthEvent: async (event, session) => {
+    if (event === 'SIGNED_OUT') {
+      // Don't call supabase.auth.signOut() again — we're already in
+      // the SIGNED_OUT callback. Just clear local state.
+      try { await window.launcher.tokens.clear(); } catch { /* ignore */ }
+      set({
+        state: 'auth',
+        session: null,
+        email: null,
+        settingsOpen: false,
+        accountPopoverOpen: false,
+      });
+      return;
+    }
+    if (event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
+      if (!session) return;
+      try {
+        await window.launcher.tokens.set(serializeSession(session));
+      } catch { /* persist failure is non-fatal — session still in memory */ }
+      set({
+        session,
+        email: session.user?.email ?? null,
+      });
+    }
+  },
+
   signOut: async () => {
     try {
       await supabase.auth.signOut();
@@ -279,16 +325,18 @@ if (typeof window !== 'undefined') {
     if (error || !data?.session) {
       throw error ?? new Error('refreshSession returned no session');
     }
-    const fresh = {
-      access_token:  data.session.access_token,
-      refresh_token: data.session.refresh_token,
-      expires_at:    data.session.expires_at ?? null,
-      email:         data.session.user?.email ?? null,
-      player_id:     data.session.user?.id ?? null,
-    };
+    const fresh = serializeSession(data.session);
     // Mirror the new session into the store so any renderer code
-    // calling future server endpoints uses the rotated token.
+    // calling future server endpoints uses the rotated token. Also
+    // persist to disk so the next launcher boot sees the rotated
+    // token rather than an expired one. Note: onAuthStateChange's
+    // TOKEN_REFRESHED event will fire from supabase right after this
+    // and run the same persist via applyAuthEvent — that's idempotent
+    // (same bytes), so the double-write is harmless.
     useAppStore.setState({ session: data.session });
+    try {
+      await window.launcher.tokens.set(fresh);
+    } catch { /* persist failure is non-fatal */ }
     return fresh;
   };
 }

@@ -7,6 +7,7 @@ import AuthScreen from './screens/AuthScreen.jsx';
 import HomeScreen from './screens/HomeScreen.jsx';
 import LauncherUpdateBanner from './components/LauncherUpdateBanner.jsx';
 import { connectLauncherSocket, disconnectLauncherSocket } from './api/launcherSocket.js';
+import { supabase } from './auth/supabase.js';
 
 // Polling fallback for live server status. The Socket.io connection
 // is the primary channel — this REST refresh runs every 5 min as
@@ -22,6 +23,7 @@ export default function App() {
   const signOut           = useAppStore((s) => s.signOut);
   const setUpdateStatus   = useAppStore((s) => s.setUpdateStatus);
   const loadServerStatus  = useAppStore((s) => s.loadServerStatus);
+  const applyAuthEvent    = useAppStore((s) => s.applyAuthEvent);
   const loadRealms        = useRealmStore((s) => s.load);
 
   // Rem-scaling — mirrors project-remnant/src/renderer/App.jsx:144-156
@@ -61,6 +63,23 @@ export default function App() {
     const off = window.launcher?.onSignOutRequested?.(() => signOut());
     return () => off?.();
   }, [signOut]);
+
+  // Supabase auth-state subscription. Without this, Supabase's
+  // background autorefresh rotates access_tokens inside its own client
+  // state, but the Zustand `session` slice + on-disk token store stay
+  // frozen at hydrate-time. Background `verifyOrInstall` calls then
+  // send an expired JWT and surface as "Update failed → Retry" with
+  // no obvious cause until the launcher restarts.
+  //
+  // applyAuthEvent handles TOKEN_REFRESHED (silent refresh into store
+  // + disk), USER_UPDATED (same), and SIGNED_OUT (refresh_token fully
+  // expired, or remote sign-out — route to auth screen).
+  useEffect(() => {
+    const { data } = supabase.auth.onAuthStateChange((event, session) => {
+      applyAuthEvent(event, session);
+    });
+    return () => data?.subscription?.unsubscribe?.();
+  }, [applyAuthEvent]);
 
   // Launcher self-update events. Subscribe once at boot; main fires
   // `launcher:update-status` for the lifecycle of each check.
