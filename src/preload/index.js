@@ -33,6 +33,17 @@ contextBridge.exposeInMainWorld('launcher', {
       return () => ipcRenderer.removeListener('game:spawn-error', listener);
     },
 
+    // Fires when the spawned game exits non-zero within ~5s of spawn.
+    // Most common cause is Electron's asar-integrity fuse rejecting a
+    // tampered or corrupted app.asar; also catches AV quarantine,
+    // missing files, broken executables. Renderer surfaces a Repair
+    // modal that calls forceRepair.
+    onEarlyFailure: (handler) => {
+      const listener = (_e, payload) => handler(payload);
+      ipcRenderer.on('game:early-failure', listener);
+      return () => ipcRenderer.removeListener('game:early-failure', listener);
+    },
+
     // Version + verify/install. The Play button calls verifyOrInstall
     // before spawn to ensure the local game matches the server's
     // latest version. Repair button (Settings) calls forceRepair to

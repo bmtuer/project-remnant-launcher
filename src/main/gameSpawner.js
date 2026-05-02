@@ -32,6 +32,14 @@ import { getActiveGameBinaryPath } from './gameUpdater.js';
 
 let activeChild = null;
 
+// Window during which a non-zero exit is treated as a startup-integrity
+// failure rather than a normal mid-play crash. Generous enough to cover
+// Electron 33's asar-integrity-fuse rejection (which fires before the
+// renderer paints) plus AV / cloud-sync first-launch cost; tight enough
+// that a player who genuinely just-quits within seconds doesn't trip the
+// repair modal. If false-positives surface in Sentry, tighten to 3000.
+const EARLY_EXIT_THRESHOLD_MS = 5000;
+
 /**
  * Returns true if a game process is currently running.
  */
@@ -49,7 +57,15 @@ export function isGameRunning() {
  * around this call — this module only owns the child process.
  *
  * @param {object} bundle - { jwt, refreshToken, accountId, env, realmId }
- * @param {object} hooks  - { handoff: { pipePath, nonce }, onExit?, onSpawnError? }
+ * @param {object} hooks  - {
+ *   handoff: { pipePath, nonce },
+ *   onExit?(exitCode, signal),
+ *   onSpawnError?(err),
+ *   onEarlyFailure?(exitCode, durationMs)
+ *     Fires when the child exits non-zero within EARLY_EXIT_THRESHOLD_MS.
+ *     Used to surface a "Game failed to start — repair?" modal. onExit
+ *     ALSO fires for the same exit; the two are not exclusive.
+ * }
  */
 export async function spawnGame(bundle, hooks = {}) {
   if (isGameRunning()) {
@@ -113,12 +129,24 @@ export async function spawnGame(bundle, hooks = {}) {
   });
 
   activeChild = child;
+  const spawnedAt = Date.now();
 
   child.on('exit', (code, signal) => {
     activeChild = null;
     // Normalize signal-killed (Ctrl+C, etc) to crash-code 1 so the
     // dispatch table doesn't have to special-case null.
     const exitCode = code ?? (signal ? 1 : 0);
+    const durationMs = Date.now() - spawnedAt;
+    // Startup-integrity failures (Electron 33's asar-integrity fuse
+    // rejecting a tampered asar, missing files, AV quarantine, broken
+    // .exe) all surface as fast non-zero exits. Anything past the
+    // threshold is a normal mid-play crash and routes only through
+    // onExit. Both signals fire when applicable — early failures still
+    // need the launcher-window restore + bundle cleanup that onExit
+    // does.
+    if (exitCode !== 0 && durationMs < EARLY_EXIT_THRESHOLD_MS) {
+      hooks.onEarlyFailure?.(exitCode, durationMs);
+    }
     hooks.onExit?.(exitCode, signal);
   });
 

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../store/appStore.js';
 import { useContentStore } from '../store/contentStore.js';
 import { useRealmStore, useActiveRealm } from '../store/realmStore.js';
@@ -6,6 +6,7 @@ import { useGameStore } from '../store/gameStore.js';
 import AccountPopover from '../components/AccountPopover.jsx';
 import SettingsModal  from '../components/SettingsModal.jsx';
 import PatchNotesModal from '../components/PatchNotesModal.jsx';
+import GameRepairModal from '../components/GameRepairModal.jsx';
 import { AccountIcon, SettingsIcon } from '../components/icons.jsx';
 import launcherHeroUrl from '../assets/launcher-hero.webp';
 import { relativeDate } from '../utils/relativeDate.js';
@@ -39,9 +40,22 @@ export default function HomeScreen() {
   const installedVersionByEnv = useGameStore((s) => s.installedVersionByEnv);
   const updateState           = useGameStore((s) => s.update);
   const verifyOrInstallActive = useGameStore((s) => s.verifyOrInstallActive);
+  const forceRepairActive     = useGameStore((s) => s.forceRepairActive);
   const loadInstalledVersion  = useGameStore((s) => s.loadInstalledVersion);
 
   const [openPatchNote, setOpenPatchNote] = useState(null);
+
+  // Game-spawn early failure (Electron's asar-integrity fuse, AV
+  // quarantine, etc). Modal opens on the IPC event; closes when player
+  // dismisses or when a repair completes (update.phase → 'done').
+  // declinedRef tracks "already cancelled repair on this (env, version)"
+  // to avoid re-opening the modal on repeated early-failures from the
+  // same bad install. Resets on HomeScreen unmount (sign-out) — that's
+  // the right granularity in practice; player can always retry from
+  // Settings → Repair. Key shape mirrors the main-process dedupe in
+  // src/main/index.js so the two layers stay in sync.
+  const [earlyFailure, setEarlyFailure] = useState(null);
+  const declinedRef = useRef(new Set());
 
   // Mount: load content + realms + installed version.
   useEffect(() => { loadContent(); }, [loadContent]);
@@ -49,6 +63,28 @@ export default function HomeScreen() {
   useEffect(() => {
     if (selectedRealmId) loadInstalledVersion(selectedRealmId);
   }, [selectedRealmId, loadInstalledVersion]);
+
+  // Subscribe to game:early-failure. Fires when a spawned game exits
+  // non-zero within ~5s (asar-integrity-fuse rejection, broken install).
+  // Suppress if the player has already declined repair on this same
+  // (env, version) within the session.
+  useEffect(() => {
+    const off = window.launcher?.game?.onEarlyFailure?.((payload) => {
+      const key = `${payload.env}|${payload.version ?? 'unknown'}`;
+      if (declinedRef.current.has(key)) return;
+      setEarlyFailure(payload);
+    });
+    return () => off?.();
+  }, []);
+
+  // Auto-close the repair modal once a successful repair lands. The
+  // existing UpdateProgressStrip in the footer surfaces the in-flight
+  // progress, so we don't need to render it inside the modal.
+  useEffect(() => {
+    if (earlyFailure && updateState.phase === 'done') {
+      setEarlyFailure(null);
+    }
+  }, [earlyFailure, updateState.phase]);
 
   // Background verify/install on home mount + on realm change.
   // gameUpdater's verifyOrInstall is cheap when the active version
@@ -236,6 +272,26 @@ export default function HomeScreen() {
         <PatchNotesModal
           note={openPatchNote}
           onClose={() => setOpenPatchNote(null)}
+        />
+      )}
+      {earlyFailure && (
+        <GameRepairModal
+          failure={earlyFailure}
+          repairing={
+            updateState.phase === 'manifest' ||
+            updateState.phase === 'verifying' ||
+            updateState.phase === 'downloading' ||
+            updateState.phase === 'installing'
+          }
+          repairError={updateState.phase === 'error' ? updateState.error : null}
+          onClose={() => {
+            const key = `${earlyFailure.env}|${earlyFailure.version ?? 'unknown'}`;
+            declinedRef.current.add(key);
+            setEarlyFailure(null);
+          }}
+          onRepair={() => {
+            forceRepairActive();
+          }}
         />
       )}
 

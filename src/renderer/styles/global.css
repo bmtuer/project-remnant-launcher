@@ -1123,6 +1123,13 @@ input:disabled { opacity: 0.55; }
   gap: var(--space-3);
 }
 
+/* Diagnostic line inside GameRepairModal showing version + exit code.
+   Quieter than body copy — it's reference info, not the message. */
+.repair-modal-meta {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
 /* ── Settings rows ──────────────────────────────────────────────
    Each row is a label/hint stack on the left + a control on the
    right. The body uses gap to space rows; no per-row margins. */

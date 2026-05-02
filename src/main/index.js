@@ -1,3 +1,4 @@
+import * as Sentry from '@sentry/electron/main';
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, shell } from 'electron';
 import { join } from 'path';
 import { readTokens, writeTokens, clearTokens } from './tokenStore.js';
@@ -35,6 +36,21 @@ const APP_ICON_PATH = app.isPackaged
   ? join(process.resourcesPath, 'icon.ico')
   : join(__dirname, '..', '..', 'build', 'icon.ico');
 
+// Sentry-from-the-launcher. Same DSN as the game's renderer Sentry —
+// events tagged with process: 'launcher-main' so they're filterable.
+// Init runs at module load (before app.whenReady) so any boot-time
+// crashes are captured. Sample rates kept low; this is a launcher,
+// not a hot path.
+Sentry.init({
+  dsn: 'https://2347b9144c065f818f650717531c7249@o4511204667359232.ingest.us.sentry.io/4511204764483584',
+  environment: app.isPackaged ? 'production' : 'development',
+  release: app.getVersion(),
+  tracesSampleRate: 0.0,
+  initialScope: {
+    tags: { process: 'launcher-main' },
+  },
+});
+
 // ─── Single-instance lock ─────────────────────────────────────────────
 // Required for the `remnant://` protocol handoff. When the game spawns
 // without a JWT (player double-clicked the .exe directly), it calls
@@ -70,6 +86,15 @@ if (process.defaultApp) {
 let mainWindow = null;
 let tray = null;
 let quitting = false;
+
+// Per-process dedupe for game-spawn early failures. Without this, a
+// player who declines repair and clicks Play again would re-trigger the
+// same Sentry event on every attempt. Keyed by (env|version) — same
+// install, same problem, one event regardless of which exit code
+// surfaces. Reset on launcher quit (in-memory only). Renderer's
+// declinedRef uses the same key shape, so the two dedupe layers stay
+// in sync.
+const reportedEarlyFailures = new Set();
 
 // Three discrete window-size presets. Player picks one in Settings
 // and the launcher remembers across launches. Bounds line up with the
@@ -299,6 +324,31 @@ function registerIpc() {
             if (!resolved) {
               resolved = true;
               resolve({ ok: false, error: err.code ?? 'spawn-failed' });
+            }
+          },
+          onEarlyFailure: async (exitCode, durationMs) => {
+            // Spawn succeeded, child started, then exited non-zero
+            // within the threshold. Most likely cause: Electron's
+            // asar-integrity fuse rejected a tampered or corrupted
+            // app.asar. Surface a Repair UX in the renderer.
+            const env = bundle.env ?? 'test';
+            let version = null;
+            try {
+              version = await getInstalledVersion(env);
+            } catch { /* getInstalledVersion is best-effort here */ }
+
+            mainWindow?.webContents.send('game:early-failure', {
+              env, version, exitCode, durationMs,
+            });
+
+            const dedupeKey = `${env}|${version ?? 'unknown'}`;
+            if (!reportedEarlyFailures.has(dedupeKey)) {
+              reportedEarlyFailures.add(dedupeKey);
+              Sentry.captureMessage('game_spawn_early_failure', {
+                level: 'warning',
+                fingerprint: ['game_spawn_early_failure', env, String(version)],
+                extra: { env, version, exitCode, durationMs },
+              });
             }
           },
           onExit: (code) => {
